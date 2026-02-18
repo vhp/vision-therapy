@@ -1,0 +1,208 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Vergence Trainer</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <main class="layout">
+      <section class="panel" aria-labelledby="appTitle">
+        <h1 id="appTitle">Vergence Trainer</h1>
+        <p class="intro-copy">
+          Wear
+          <a href="https://en.wikipedia.org/wiki/Anaglyph_3D" target="_blank" rel="noopener noreferrer">red/blue anaglyph glasses</a>.
+          Fuse the red/cyan dot fields and use the arrow keys to report where
+          the floating target appears.
+        </p>
+
+        <div class="hud">
+          <div class="hud-item">
+            <span class="label">Score</span>
+            <strong id="score">0</strong>
+          </div>
+          <div class="hud-item">
+            <span class="label">Current PD</span>
+            <strong id="prism">0Δ</strong>
+          </div>
+          <div class="hud-item">
+            <span class="label">Session Target PD</span>
+            <strong id="goalPdHud">35Δ</strong>
+          </div>
+          <div class="hud-item">
+            <span class="label">Round</span>
+            <strong id="round">0</strong>
+          </div>
+          <div class="hud-item">
+            <span class="label">Round Timer</span>
+            <strong id="timer">20.0s</strong>
+          </div>
+          <div class="hud-item">
+            <span class="label">Session Left</span>
+            <strong id="sessionTimer">07:00</strong>
+          </div>
+        </div>
+
+        <div class="controls">
+          <button id="startBtn" type="button">Start</button>
+          <button id="resetBtn" type="button" class="ghost">Reset</button>
+        </div>
+
+        <div class="setup-grid core-setup">
+          <label for="vergenceMode">Vergence Mode</label>
+          <select id="vergenceMode"></select>
+          <label for="visualPreset">Visual Preset</label>
+          <select id="visualPreset"></select>
+          <label for="goalPd">Session Target (Δ)</label>
+          <input
+            id="goalPd"
+            type="number"
+            min="1"
+            max="500"
+            step="1"
+            value="35"
+          />
+          <label for="sessionMinutes">Session Minutes</label>
+          <input
+            id="sessionMinutes"
+            type="number"
+            min="1"
+            max="30"
+            step="1"
+            value="7"
+          />
+        </div>
+
+        <details class="advanced-setup">
+          <summary>Advanced Settings</summary>
+          <div class="setup-grid">
+            <label
+              for="monitorWidth"
+              class="monitor-width-label has-tooltip"
+              title="Measure the physical monitor width from side to side, not diagonally."
+            >
+              Monitor Width (in, set once)
+            </label>
+            <input
+              id="monitorWidth"
+              type="number"
+              min="10"
+              max="60"
+              step="0.5"
+              value="24"
+            />
+            <label for="viewDistance">View Distance (in)</label>
+            <input
+              id="viewDistance"
+              type="number"
+              min="8"
+              max="60"
+              step="0.5"
+              value="16"
+            />
+            <label for="startPd" class="debug-only">Start PD (Δ)</label>
+            <input
+              id="startPd"
+              class="debug-only"
+              type="number"
+              min="0"
+              max="500"
+              step="1"
+              value="0"
+            />
+            <label for="roundSeconds">Round Seconds</label>
+            <input
+              id="roundSeconds"
+              type="number"
+              min="5"
+              max="120"
+              step="1"
+              value="20"
+            />
+            <label for="lrSplit" class="readonly-label">L/R Split (px)</label>
+            <input id="lrSplit" type="text" value="0 px" readonly />
+          </div>
+          <ul class="advanced-help-list">
+            <li>
+              <strong>Monitor Width / View Distance:</strong> set PD estimation scaling.
+              Monitor Width is saved in this browser after first setup.
+            </li>
+            <li class="debug-only"><strong>Start PD:</strong> debug-only value used as the initial PD estimate.</li>
+            <li><strong>Round Seconds:</strong> controls the round timer (default 20s). Timeout beeps and scores -1.</li>
+            <li><strong>L/R Split:</strong> read-only rendering split shown for reference.</li>
+          </ul>
+        </details>
+        <p id="status" class="status" aria-live="polite">Press Start to begin.</p>
+        <div id="pauseCard" class="pause-card" hidden>
+          <strong class="pause-title">Session Paused</strong>
+          <div class="pause-grid">
+            <span class="pause-key">Exercise</span>
+            <strong id="pauseExerciseName">Vergence Trainer</strong>
+            <span class="pause-key">Vergence</span>
+            <strong id="pauseVergenceMode">Convergence</strong>
+            <span class="pause-key">L/R Split</span>
+            <strong id="pauseLrSplit">0 px</strong>
+          </div>
+        </div>
+        <p id="debugStatus" class="debug-status" hidden></p>
+        <div id="debugControls" class="debug-controls" hidden>
+          <button id="debugDownBtn" type="button" class="ghost debug-btn" aria-label="Decrease difficulty">-</button>
+          <button id="debugUpBtn" type="button" class="ghost debug-btn" aria-label="Increase difficulty">+</button>
+        </div>
+
+        <ul class="instructions">
+          <li><kbd>Arrow Keys</kbd> = choose side (up/right/down/left)</li>
+          <li>
+            You will see overlapping red/cyan circular dot fields. With fusion,
+            a single target appears in depth from binocular disparity (not a
+            drawn outline).
+          </li>
+          <li><kbd>Space</kbd> = cannot see target, score -1 and refresh</li>
+          <li><kbd>P</kbd> = pause/resume session. Exiting fullscreen with <kbd>Esc</kbd> pauses automatically.</li>
+          <li>
+            <strong>Core Settings (in order):</strong> Vergence Mode,
+            Visual Preset, Session Target, and Session Minutes define the
+            session profile.
+          </li>
+          <li>
+            Correct answers increase PD; wrong answers, timeout, and
+            <kbd>Space</kbd> reduce PD.
+          </li>
+        </ul>
+      </section>
+
+      <section id="viewerWrap" class="viewer-wrap">
+        <canvas
+          id="viewer"
+          width="680"
+          height="680"
+          aria-label="Vergence training target"
+          role="img"
+        ></canvas>
+      </section>
+    </main>
+    <p class="disclaimer-note page-footer-warning">
+      For educational and self-training use only. Not medical advice or a medical device.
+    </p>
+
+    <section id="summaryCard" class="summary-card hidden" aria-live="polite">
+      <h2>Session Summary</h2>
+      <div class="summary-grid">
+        <div><span>Result</span><strong id="sumResult">-</strong></div>
+        <div><span>Best PD</span><strong id="sumBestPd">0Δ</strong></div>
+        <div><span>Session Target PD</span><strong id="sumGoalPd">35Δ</strong></div>
+        <div><span>Final Score</span><strong id="sumScore">0</strong></div>
+        <div><span>Rounds</span><strong id="sumRounds">0</strong></div>
+        <div><span>Session Time</span><strong id="sumDuration">00:00</strong></div>
+        <div><span>Correct</span><strong id="sumCorrect">0</strong></div>
+        <div><span>Wrong</span><strong id="sumWrong">0</strong></div>
+        <div><span>Timeouts</span><strong id="sumTimeouts">0</strong></div>
+        <div><span>Skips</span><strong id="sumSkips">0</strong></div>
+      </div>
+    </section>
+
+    <script src="config.js"></script>
+    <script src="app.js"></script>
+  </body>
+</html>

@@ -1,0 +1,1568 @@
+/*
+  Vergence Trainer.
+  App flow: input config -> session state -> HUD/canvas render.
+  Runtime settings are loaded from window.APP_CONFIG (config.js).
+*/
+
+if (!window.APP_CONFIG) {
+  throw new Error("APP_CONFIG missing. Load config.js before app.js.");
+}
+
+const {
+  DEFAULT_ROUND_SECONDS,
+  MIN_ROUND_SECONDS,
+  MAX_ROUND_SECONDS,
+  TICK_MS,
+  PD_GAIN_PER_CORRECT,
+  PD_LOSS_PER_ERROR = 1,
+  INACTIVITY_PAUSE_MS,
+  NEXT_ROUND_DELAY_MS,
+  CONFIG_STORAGE_KEY,
+  DEFAULT_MONITOR_WIDTH_IN,
+  DEFAULT_VIEW_DISTANCE_IN,
+  DEFAULT_START_PD,
+  DEFAULT_GOAL_PD,
+  DEFAULT_SESSION_MINUTES,
+  DEFAULT_VISUAL_PRESET,
+  ABSOLUTE_PD_MAX,
+  ABSOLUTE_SESSION_MINUTES_MAX,
+  MIN_MONITOR_WIDTH_IN,
+  MAX_MONITOR_WIDTH_IN,
+  MIN_VIEW_DISTANCE_IN,
+  MAX_VIEW_DISTANCE_IN,
+  BASE_TOTAL_SPLIT_PX,
+  SPLIT_GAIN_PX_PER_STEP,
+  BACKGROUND_SPLIT_RATIO,
+  SQUARE_SPLIT_RATIO,
+  TARGET_OFFSET_RATIO = 0.52,
+  TARGET_HALF_SIZE_RATIO = 0.2,
+  TARGET_EDGE_PADDING_PX = 2,
+  TARGET_POP_SIZE_PX = 0,
+  TARGET_POP_ALPHA_SCALE = 1.0,
+  INITIAL_DOT_COUNT,
+  ROUND_DOT_COUNT,
+  DOT_MEDIUM_THRESHOLD = 0.68,
+  DOT_LARGE_THRESHOLD = 0.96,
+  DOT_SMALL_SIZE_PX = 1,
+  DOT_MEDIUM_SIZE_PX = 2,
+  DOT_LARGE_SIZE_PX = 3,
+  LEFT_DOT_COLOR,
+  RIGHT_DOT_COLOR,
+  VERGENCE_MODES: CONFIGURED_VERGENCE_MODES,
+  VISUAL_PRESETS: CONFIGURED_VISUAL_PRESETS
+} = window.APP_CONFIG;
+
+const FALLBACK_VERGENCE_MODES = Object.freeze([
+  { value: "convergence", label: "Convergence" },
+  { value: "divergence", label: "Divergence" },
+  { value: "alternate", label: "Alternate" }
+]);
+
+const VERGENCE_MODES = Object.freeze(
+  (Array.isArray(CONFIGURED_VERGENCE_MODES) ? CONFIGURED_VERGENCE_MODES : FALLBACK_VERGENCE_MODES)
+    .map(mode => {
+      const value = typeof mode?.value === "string" ? mode.value : "";
+      const label = typeof mode?.label === "string" && mode.label.trim() ? mode.label : value;
+      return { value, label };
+    })
+    .filter(mode => mode.value.length > 0)
+);
+
+if (VERGENCE_MODES.length === 0) {
+  throw new Error("APP_CONFIG.VERGENCE_MODES must include at least one mode.");
+}
+
+const DEFAULT_VERGENCE_MODE = VERGENCE_MODES[0].value;
+const VERGENCE_MODE_MAP = new Map(VERGENCE_MODES.map(mode => [mode.value, mode]));
+
+const FALLBACK_VISUAL_PRESET_TUNING = Object.freeze({
+  backgroundSplitRatio: BACKGROUND_SPLIT_RATIO,
+  squareSplitRatio: SQUARE_SPLIT_RATIO,
+  targetPopSizePx: TARGET_POP_SIZE_PX,
+  targetPopAlphaScale: TARGET_POP_ALPHA_SCALE,
+  dotMediumThreshold: DOT_MEDIUM_THRESHOLD,
+  dotLargeThreshold: DOT_LARGE_THRESHOLD,
+  dotSmallSizePx: DOT_SMALL_SIZE_PX,
+  dotMediumSizePx: DOT_MEDIUM_SIZE_PX,
+  dotLargeSizePx: DOT_LARGE_SIZE_PX
+});
+const FALLBACK_VISUAL_PRESETS = Object.freeze([
+  {
+    value: "balanced",
+    label: "Balanced",
+    tuning: FALLBACK_VISUAL_PRESET_TUNING
+  }
+]);
+const VISUAL_PRESETS = Object.freeze(
+  (Array.isArray(CONFIGURED_VISUAL_PRESETS) ? CONFIGURED_VISUAL_PRESETS : FALLBACK_VISUAL_PRESETS)
+    .map(normalizeVisualPresetConfig)
+    .filter(Boolean)
+);
+
+if (VISUAL_PRESETS.length === 0) {
+  throw new Error("APP_CONFIG.VISUAL_PRESETS must include at least one preset.");
+}
+
+const VISUAL_PRESET_MAP = new Map(VISUAL_PRESETS.map(preset => [preset.value, preset]));
+const DEFAULT_VISUAL_PRESET_VALUE = VISUAL_PRESET_MAP.has(DEFAULT_VISUAL_PRESET)
+  ? DEFAULT_VISUAL_PRESET
+  : VISUAL_PRESETS[0].value;
+const DEFAULT_VISUAL_TUNING = getVisualPresetTuning(DEFAULT_VISUAL_PRESET_VALUE);
+
+const SIDE_KEYS = {
+  ArrowUp: "up",
+  ArrowRight: "right",
+  ArrowDown: "down",
+  ArrowLeft: "left"
+};
+const SIDES = ["up", "right", "down", "left"];
+const EXERCISE_LABEL = "Vergence Trainer";
+const URL_FLAGS = readUrlFlags();
+const DEBUG_MODE = URL_FLAGS.debug;
+const CLEAR_SAVED_CONFIG_ON_LOAD = URL_FLAGS.clearSettings;
+
+const scoreEl = document.getElementById("score");
+const prismEl = document.getElementById("prism");
+const goalPdHudEl = document.getElementById("goalPdHud");
+const roundEl = document.getElementById("round");
+const timerEl = document.getElementById("timer");
+const sessionTimerEl = document.getElementById("sessionTimer");
+const statusEl = document.getElementById("status");
+const pauseCardEl = document.getElementById("pauseCard");
+const pauseExerciseNameEl = document.getElementById("pauseExerciseName");
+const pauseVergenceModeEl = document.getElementById("pauseVergenceMode");
+const pauseLrSplitEl = document.getElementById("pauseLrSplit");
+const debugStatusEl = document.getElementById("debugStatus");
+const debugControlsEl = document.getElementById("debugControls");
+const debugDownBtn = document.getElementById("debugDownBtn");
+const debugUpBtn = document.getElementById("debugUpBtn");
+const startBtn = document.getElementById("startBtn");
+const resetBtn = document.getElementById("resetBtn");
+const advancedSetupEl = document.querySelector(".advanced-setup");
+
+const monitorWidthInput = document.getElementById("monitorWidth");
+const viewDistanceInput = document.getElementById("viewDistance");
+const vergenceModeInput = document.getElementById("vergenceMode");
+const visualPresetInput = document.getElementById("visualPreset");
+const startPdInput = document.getElementById("startPd");
+const goalPdInput = document.getElementById("goalPd");
+const sessionMinutesInput = document.getElementById("sessionMinutes");
+const roundSecondsInput = document.getElementById("roundSeconds");
+const lrSplitInput = document.getElementById("lrSplit");
+
+const summaryCardEl = document.getElementById("summaryCard");
+const sumResultEl = document.getElementById("sumResult");
+const sumBestPdEl = document.getElementById("sumBestPd");
+const sumGoalPdEl = document.getElementById("sumGoalPd");
+const sumScoreEl = document.getElementById("sumScore");
+const sumRoundsEl = document.getElementById("sumRounds");
+const sumDurationEl = document.getElementById("sumDuration");
+const sumCorrectEl = document.getElementById("sumCorrect");
+const sumWrongEl = document.getElementById("sumWrong");
+const sumTimeoutsEl = document.getElementById("sumTimeouts");
+const sumSkipsEl = document.getElementById("sumSkips");
+
+const canvas = document.getElementById("viewer");
+const ctx = canvas.getContext("2d");
+
+if (!ctx) {
+  throw new Error("Canvas context not available.");
+}
+if (
+  !monitorWidthInput ||
+  !viewDistanceInput ||
+  !vergenceModeInput ||
+  !visualPresetInput ||
+  !startPdInput ||
+  !goalPdInput ||
+  !sessionMinutesInput ||
+  !roundSecondsInput ||
+  !lrSplitInput
+) {
+  throw new Error("Training config input(s) missing.");
+}
+if (!prismEl || !goalPdHudEl || !sessionTimerEl) {
+  throw new Error("HUD element(s) missing.");
+}
+if (!pauseCardEl || !pauseExerciseNameEl || !pauseVergenceModeEl || !pauseLrSplitEl) {
+  throw new Error("Pause card element(s) missing.");
+}
+if (
+  !summaryCardEl ||
+  !sumResultEl ||
+  !sumBestPdEl ||
+  !sumGoalPdEl ||
+  !sumScoreEl ||
+  !sumRoundsEl ||
+  !sumDurationEl ||
+  !sumCorrectEl ||
+  !sumWrongEl ||
+  !sumTimeoutsEl ||
+  !sumSkipsEl
+) {
+  throw new Error("Summary element(s) missing.");
+}
+
+const state = {
+  running: false,
+  paused: false,
+  score: 0,
+  currentPd: 0,
+  bestPd: 0,
+  goalPd: DEFAULT_GOAL_PD,
+  vergenceMode: DEFAULT_VERGENCE_MODE,
+  visualPreset: DEFAULT_VISUAL_PRESET_VALUE,
+  visualTuning: DEFAULT_VISUAL_TUNING,
+  roundVergence: DEFAULT_VERGENCE_MODE,
+  difficultySteps: 0,
+  monitorWidthIn: DEFAULT_MONITOR_WIDTH_IN,
+  viewDistanceIn: DEFAULT_VIEW_DISTANCE_IN,
+  correctCount: 0,
+  wrongCount: 0,
+  skipCount: 0,
+  timeoutCount: 0,
+  sessionDurationMs: DEFAULT_SESSION_MINUTES * 60_000,
+  roundDurationMs: DEFAULT_ROUND_SECONDS * 1000,
+  round: 0,
+  targetSide: "up",
+  roundSeed: 0,
+  roundStartTs: 0,
+  roundEndTs: 0,
+  sessionStartTs: 0,
+  sessionEndTs: 0,
+  lastResponseTs: performance.now(),
+  nowTs: performance.now(),
+  dots: buildDotField(INITIAL_DOT_COUNT, 220, 1001, DEFAULT_VISUAL_TUNING),
+  lastRoundEvent: "idle",
+  lastInputSide: "-",
+  lastTargetSide: "-",
+  lastDifficultyDeltaPd: 0,
+  monitorWidthConfirmed: false
+};
+
+let tickIntervalId = null;
+let audioCtx = null;
+let wasFullscreenActive = isFullscreenActive();
+
+startBtn.addEventListener("click", async () => {
+  if (state.running) return;
+  if (!state.paused && !state.monitorWidthConfirmed) {
+    updateStatus("Set Monitor Width in Advanced Settings before starting. This is saved for future sessions.", true);
+    focusMonitorWidthInput();
+    return;
+  }
+  ensureAudioContext();
+  await requestFullscreenOnStart();
+  if (state.paused) {
+    resumeSession();
+    return;
+  }
+  startSession();
+});
+resetBtn.addEventListener("click", resetSession);
+
+monitorWidthInput.addEventListener("change", onConfigChange);
+viewDistanceInput.addEventListener("change", onConfigChange);
+vergenceModeInput.addEventListener("change", onConfigChange);
+visualPresetInput.addEventListener("change", onConfigChange);
+startPdInput.addEventListener("change", onConfigChange);
+goalPdInput.addEventListener("change", onConfigChange);
+sessionMinutesInput.addEventListener("change", onConfigChange);
+roundSecondsInput.addEventListener("change", onConfigChange);
+
+window.addEventListener("keydown", onKeyDown);
+if (debugDownBtn) {
+  debugDownBtn.addEventListener("click", () => applyDebugDifficultyAdjustment(-1, "button"));
+}
+if (debugUpBtn) {
+  debugUpBtn.addEventListener("click", () => applyDebugDifficultyAdjustment(1, "button"));
+}
+window.addEventListener("blur", () => {
+  if (state.running) {
+    updateStatus("Tab is inactive. Return to continue responding with arrows/space.");
+  }
+});
+document.addEventListener("fullscreenchange", onFullscreenChange);
+document.addEventListener("webkitfullscreenchange", onFullscreenChange);
+
+initializeConfigInputs();
+refreshIdlePreview();
+
+function startSession() {
+  const config = readConfigInputs();
+  applyConfigInputs(config);
+  persistConfig(config);
+
+  state.running = true;
+  state.paused = false;
+  state.score = 0;
+  applyConfigToState(config);
+  state.correctCount = 0;
+  state.wrongCount = 0;
+  state.skipCount = 0;
+  state.timeoutCount = 0;
+  state.round = 0;
+  state.roundVergence = resolveRoundVergence(config.vergenceMode, 1);
+
+  state.sessionStartTs = performance.now();
+  state.sessionEndTs = state.sessionStartTs + state.sessionDurationMs;
+  state.nowTs = state.sessionStartTs;
+  state.lastResponseTs = state.sessionStartTs;
+  setRoundDebugState("start", "-", "-", 0);
+
+  setInputsDisabled(true);
+  setStartButtonLabel();
+  syncSessionLayoutMode();
+  hideSummaryCard();
+
+  updateStatus(
+    `Session started: ${config.sessionMinutes} min, round ${config.roundSeconds}s, session target ${formatPd(config.goalPd)}Δ, mode ${formatVergenceLabel(config.vergenceMode)}, visual ${formatVisualPresetLabel(config.visualPreset)}. Estimated start ${formatPd(state.currentPd)}Δ.`
+  );
+  startRound();
+}
+
+function resetSession() {
+  const config = readConfigInputs();
+  applyConfigInputs(config);
+  persistConfig(config);
+
+  state.running = false;
+  state.paused = false;
+  state.score = 0;
+  applyConfigToState(config);
+  state.correctCount = 0;
+  state.wrongCount = 0;
+  state.skipCount = 0;
+  state.timeoutCount = 0;
+  state.round = 0;
+  state.roundVergence = resolveRoundVergence(config.vergenceMode, 1);
+  state.targetSide = "up";
+  state.roundSeed = 1001;
+  state.roundStartTs = 0;
+  state.roundEndTs = 0;
+  state.sessionStartTs = 0;
+  state.sessionEndTs = 0;
+  state.nowTs = performance.now();
+  state.lastResponseTs = state.nowTs;
+  state.dots = buildDotField(INITIAL_DOT_COUNT, 220, state.roundSeed, state.visualTuning);
+  setRoundDebugState("idle", "-", "-", 0);
+
+  stopRoundTicker();
+  setInputsDisabled(false);
+  setStartButtonLabel();
+  syncMonitorWidthSetupUi();
+  syncSessionLayoutMode();
+  hideSummaryCard();
+
+  if (!state.monitorWidthConfirmed) {
+    updateStatus(
+      "Reset complete. Set Monitor Width in Advanced Settings before starting. This is saved for future sessions.",
+      true
+    );
+  } else {
+    updateStatus(
+      `Reset complete. Press Start for ${config.sessionMinutes} min. Round ${config.roundSeconds}s, start ${formatPd(state.currentPd)}Δ, session target ${formatPd(config.goalPd)}Δ, mode ${formatVergenceLabel(config.vergenceMode)}, visual ${formatVisualPresetLabel(config.visualPreset)}.`
+    );
+  }
+  updateHud();
+  renderScene();
+}
+
+function onConfigChange(event) {
+  if (state.running || state.paused) return;
+  if (event?.target === monitorWidthInput) {
+    const monitorWidthCandidate = Number.parseFloat(monitorWidthInput.value);
+    state.monitorWidthConfirmed = Number.isFinite(monitorWidthCandidate);
+  }
+
+  const config = readConfigInputs();
+  applyConfigInputs(config);
+  persistConfig(config);
+  syncMonitorWidthSetupUi();
+
+  applyConfigToState(config);
+  state.nowTs = performance.now();
+  state.lastResponseTs = state.nowTs;
+  updateReadyStatus(config);
+  updateHud();
+  renderScene();
+  hideSummaryCard();
+}
+
+function startRound() {
+  if (!state.running) return;
+
+  const now = performance.now();
+  state.nowTs = now;
+  if (now >= state.sessionEndTs) {
+    endSession();
+    return;
+  }
+
+  state.round += 1;
+  state.roundVergence = resolveRoundVergence(state.vergenceMode, state.round);
+  state.targetSide = SIDES[(Math.random() * SIDES.length) | 0];
+  state.roundSeed = ((Math.random() * 0xffffffff) | 0) >>> 0;
+  state.roundStartTs = now;
+  state.roundEndTs = state.roundStartTs + state.roundDurationMs;
+
+  const fieldRadius = getFieldRadius();
+  state.dots = buildDotField(ROUND_DOT_COUNT, fieldRadius, state.roundSeed, state.visualTuning);
+  setRoundDebugState("pending", "-", state.targetSide, 0);
+
+  startRoundTicker();
+
+  updateHud();
+  renderScene();
+}
+
+function startRoundTicker() {
+  stopRoundTicker();
+  tickIntervalId = setInterval(() => {
+    state.nowTs = performance.now();
+
+    if (state.nowTs - state.lastResponseTs >= INACTIVITY_PAUSE_MS) {
+      pauseSessionForInactivity();
+      return;
+    }
+
+    if (state.nowTs >= state.sessionEndTs) {
+      endSession();
+      return;
+    }
+
+    if (state.nowTs >= state.roundEndTs) {
+      handleRoundTimeout();
+      return;
+    }
+
+    updateHud();
+  }, TICK_MS);
+}
+
+function handleRoundTimeout() {
+  if (!state.running) return;
+
+  stopRoundTicker();
+
+  state.score -= 1;
+  state.timeoutCount += 1;
+  const pdDelta = applyDifficultyDelta(-PD_LOSS_PER_ERROR);
+  setRoundDebugState("timeout", "-", state.targetSide, pdDelta);
+  playNegativeFeedbackBeep();
+  updateStatus("Round timeout. Score -1.", true);
+  updateHud();
+
+  setTimeout(() => {
+    if (!state.running) return;
+    if (performance.now() >= state.sessionEndTs) {
+      endSession();
+      return;
+    }
+    startRound();
+  }, NEXT_ROUND_DELAY_MS);
+}
+
+function onKeyDown(event) {
+  if (event.repeat) return;
+  if (handlePauseToggleHotkey(event)) return;
+  if (handleDebugDifficultyHotkeys(event)) return;
+  if (!state.running) return;
+
+  if (event.code === "Space") {
+    event.preventDefault();
+    state.lastResponseTs = performance.now();
+    state.score -= 1;
+    state.skipCount += 1;
+    const pdDelta = applyDifficultyDelta(-PD_LOSS_PER_ERROR);
+    setRoundDebugState("skip", "space", state.targetSide, pdDelta);
+    playNegativeFeedbackBeep();
+    updateStatus("Marked unseen. Score -1. New stereogram.", true);
+    updateHud();
+    startRound();
+    return;
+  }
+
+  const side = SIDE_KEYS[event.key];
+  if (!side) return;
+
+  event.preventDefault();
+  state.lastResponseTs = performance.now();
+  const correct = side === state.targetSide;
+
+  if (correct) {
+    state.score += 1;
+    state.correctCount += 1;
+    const pdDelta = applyDifficultyDelta(PD_GAIN_PER_CORRECT);
+    setRoundDebugState("correct", side, state.targetSide, pdDelta);
+    playPositiveFeedbackBeep();
+
+    if (state.bestPd >= state.goalPd) {
+      updateStatus(`Correct (${side}). Score +1. Session target reached at ${formatPd(state.bestPd)}Δ.`);
+    } else {
+      updateStatus(`Correct (${side}). Score +1. Current ${formatPd(state.currentPd)}Δ.`);
+    }
+  } else {
+    state.score -= 1;
+    state.wrongCount += 1;
+    const pdDelta = applyDifficultyDelta(-PD_LOSS_PER_ERROR);
+    setRoundDebugState("wrong", side, state.targetSide, pdDelta);
+    playNegativeFeedbackBeep();
+    updateStatus(`Wrong (${side}). Score -1.`, true);
+  }
+
+  updateHud();
+  startRound();
+}
+
+function handlePauseToggleHotkey(event) {
+  if (event.code !== "KeyP") return false;
+  if (isEditableTarget(event.target)) return false;
+  if (!state.running && !state.paused) return false;
+
+  event.preventDefault();
+  if (state.running) {
+    pauseSessionByUser("Press Resume or P to continue.");
+    exitFullscreenIfActive();
+  } else {
+    resumeSessionWithFullscreen();
+  }
+  return true;
+}
+
+function handleDebugDifficultyHotkeys(event) {
+  if (!DEBUG_MODE) return false;
+  if (isEditableTarget(event.target)) return false;
+
+  const direction = getDebugDifficultyDirection(event);
+  if (direction === 0) return false;
+
+  event.preventDefault();
+  applyDebugDifficultyAdjustment(direction, "key");
+  return true;
+}
+
+function getDebugDifficultyDirection(event) {
+  if (event.code === "NumpadAdd") return 1;
+  if (event.code === "NumpadSubtract") return -1;
+  if (event.code === "Equal") return 1;
+  if (event.code === "Minus") return -1;
+  return 0;
+}
+
+function applyDebugDifficultyAdjustment(direction, source) {
+  if (!DEBUG_MODE) return;
+  if (direction !== 1 && direction !== -1) return;
+
+  const pdDelta = applyDifficultyDelta(direction);
+  const pdDeltaText = `${pdDelta >= 0 ? "+" : ""}${pdDelta.toFixed(1)}Δ`;
+  const directionText = direction > 0 ? "up" : "down";
+  const eventPrefix = source === "button" ? "debugBtn" : "debugKey";
+
+  setRoundDebugState(direction > 0 ? `${eventPrefix}+` : `${eventPrefix}-`, direction > 0 ? "+" : "-", "-", pdDelta);
+  state.nowTs = performance.now();
+  updateStatus(`Debug difficulty ${directionText}: 1 step (${pdDeltaText}).`);
+  updateHud();
+  renderScene();
+}
+
+function isEditableTarget(target) {
+  if (!(target instanceof Element)) return false;
+  if (target instanceof HTMLInputElement) return true;
+  if (target instanceof HTMLTextAreaElement) return true;
+  if (target instanceof HTMLSelectElement) return true;
+  return target.isContentEditable;
+}
+
+function endSession() {
+  if (!state.running) return;
+
+  state.running = false;
+  state.paused = false;
+  stopRoundTicker();
+  state.nowTs = performance.now();
+  setInputsDisabled(false);
+  setStartButtonLabel();
+  syncSessionLayoutMode();
+
+  const reachedGoal = state.bestPd >= state.goalPd;
+  showSummaryCard(reachedGoal);
+
+  if (reachedGoal) {
+    beep(1080, 130);
+    updateStatus(`Session complete. Target met: best ${formatPd(state.bestPd)}Δ (target ${formatPd(state.goalPd)}Δ).`);
+  } else {
+    beep(660, 140);
+    updateStatus(`Session complete. Target not met: best ${formatPd(state.bestPd)}Δ (target ${formatPd(state.goalPd)}Δ).`, true);
+  }
+
+  updateHud();
+  renderScene();
+}
+
+function initializeConfigInputs() {
+  document.body.classList.toggle("debug-mode", DEBUG_MODE);
+
+  monitorWidthInput.min = String(MIN_MONITOR_WIDTH_IN);
+  monitorWidthInput.max = String(MAX_MONITOR_WIDTH_IN);
+  monitorWidthInput.step = "0.5";
+  monitorWidthInput.value = String(DEFAULT_MONITOR_WIDTH_IN);
+
+  viewDistanceInput.min = String(MIN_VIEW_DISTANCE_IN);
+  viewDistanceInput.max = String(MAX_VIEW_DISTANCE_IN);
+  viewDistanceInput.step = "0.5";
+  viewDistanceInput.value = String(DEFAULT_VIEW_DISTANCE_IN);
+
+  populateVergenceModeInput();
+  populateVisualPresetInput();
+
+  startPdInput.min = "0";
+  startPdInput.max = String(ABSOLUTE_PD_MAX);
+  startPdInput.step = "1";
+  startPdInput.value = String(DEFAULT_START_PD);
+
+  goalPdInput.min = "1";
+  goalPdInput.max = String(ABSOLUTE_PD_MAX);
+  goalPdInput.step = "1";
+  goalPdInput.value = String(DEFAULT_GOAL_PD);
+
+  sessionMinutesInput.min = "1";
+  sessionMinutesInput.max = String(ABSOLUTE_SESSION_MINUTES_MAX);
+  sessionMinutesInput.step = "1";
+  sessionMinutesInput.value = String(DEFAULT_SESSION_MINUTES);
+
+  roundSecondsInput.min = String(MIN_ROUND_SECONDS);
+  roundSecondsInput.max = String(MAX_ROUND_SECONDS);
+  roundSecondsInput.step = "1";
+  roundSecondsInput.value = String(DEFAULT_ROUND_SECONDS);
+
+  if (debugStatusEl) {
+    debugStatusEl.hidden = !DEBUG_MODE;
+  }
+  if (debugControlsEl) {
+    debugControlsEl.hidden = !DEBUG_MODE;
+  }
+  if (CLEAR_SAVED_CONFIG_ON_LOAD) {
+    clearPersistedConfig();
+    clearOneShotUrlFlags();
+  }
+
+  const persistedConfig = hydratePersistedConfigIntoInputs();
+  state.monitorWidthConfirmed = getPersistedMonitorWidthConfirmed(persistedConfig);
+  const sanitizedConfig = readConfigInputs();
+  applyConfigInputs(sanitizedConfig);
+  persistConfig(sanitizedConfig);
+  syncMonitorWidthSetupUi();
+  syncSessionLayoutMode();
+}
+
+function readConfigInputs() {
+  const monitorWidthRaw = Number.parseFloat(monitorWidthInput.value);
+  const viewDistanceRaw = Number.parseFloat(viewDistanceInput.value);
+  const vergenceMode = normalizeVergenceMode(vergenceModeInput.value);
+  const visualPreset = normalizeVisualPreset(visualPresetInput.value);
+  const startPdRaw = Number.parseInt(startPdInput.value, 10);
+  const goalPdRaw = Number.parseInt(goalPdInput.value, 10);
+  const sessionMinutesRaw = Number.parseInt(sessionMinutesInput.value, 10);
+  const roundSecondsRaw = Number.parseInt(roundSecondsInput.value, 10);
+
+  const monitorWidthIn = clampFloat(monitorWidthRaw, MIN_MONITOR_WIDTH_IN, MAX_MONITOR_WIDTH_IN, DEFAULT_MONITOR_WIDTH_IN);
+  const viewDistanceIn = clampFloat(viewDistanceRaw, MIN_VIEW_DISTANCE_IN, MAX_VIEW_DISTANCE_IN, DEFAULT_VIEW_DISTANCE_IN);
+  const startPd = clampInt(startPdRaw, 0, ABSOLUTE_PD_MAX, DEFAULT_START_PD);
+  const goalPd = clampInt(goalPdRaw, 1, ABSOLUTE_PD_MAX, DEFAULT_GOAL_PD);
+  const sessionMinutes = clampInt(sessionMinutesRaw, 1, ABSOLUTE_SESSION_MINUTES_MAX, DEFAULT_SESSION_MINUTES);
+  const roundSeconds = clampInt(roundSecondsRaw, MIN_ROUND_SECONDS, MAX_ROUND_SECONDS, DEFAULT_ROUND_SECONDS);
+
+  return { monitorWidthIn, viewDistanceIn, vergenceMode, visualPreset, startPd, goalPd, sessionMinutes, roundSeconds };
+}
+
+function hydratePersistedConfigIntoInputs() {
+  const persisted = readPersistedConfig();
+  if (!persisted) return null;
+
+  if (Number.isFinite(persisted.monitorWidthIn)) {
+    monitorWidthInput.value = String(persisted.monitorWidthIn);
+  }
+  if (Number.isFinite(persisted.viewDistanceIn)) {
+    viewDistanceInput.value = String(persisted.viewDistanceIn);
+  }
+  if (typeof persisted.vergenceMode === "string") {
+    vergenceModeInput.value = persisted.vergenceMode;
+  }
+  if (typeof persisted.visualPreset === "string") {
+    visualPresetInput.value = persisted.visualPreset;
+  }
+  if (Number.isFinite(persisted.startPd)) {
+    startPdInput.value = String(Math.trunc(persisted.startPd));
+  }
+  if (Number.isFinite(persisted.goalPd)) {
+    goalPdInput.value = String(Math.trunc(persisted.goalPd));
+  }
+  if (Number.isFinite(persisted.sessionMinutes)) {
+    sessionMinutesInput.value = String(Math.trunc(persisted.sessionMinutes));
+  }
+  if (Number.isFinite(persisted.roundSeconds)) {
+    roundSecondsInput.value = String(Math.trunc(persisted.roundSeconds));
+  }
+  return persisted;
+}
+
+function readPersistedConfig() {
+  try {
+    const raw = window.localStorage?.getItem(CONFIG_STORAGE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object") return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+function clearPersistedConfig() {
+  try {
+    window.localStorage?.removeItem(CONFIG_STORAGE_KEY);
+  } catch {
+    // Ignore storage errors (privacy mode, blocked storage, etc.).
+  }
+}
+
+function persistConfig(config) {
+  const payload = {
+    monitorWidthIn: config.monitorWidthIn,
+    monitorWidthConfirmed: state.monitorWidthConfirmed,
+    viewDistanceIn: config.viewDistanceIn,
+    vergenceMode: config.vergenceMode,
+    visualPreset: config.visualPreset,
+    startPd: config.startPd,
+    goalPd: config.goalPd,
+    sessionMinutes: config.sessionMinutes,
+    roundSeconds: config.roundSeconds
+  };
+
+  try {
+    window.localStorage?.setItem(CONFIG_STORAGE_KEY, JSON.stringify(payload));
+  } catch {
+    // Ignore storage errors (privacy mode, blocked storage, etc.).
+  }
+}
+
+function applyConfigInputs(config) {
+  monitorWidthInput.value = formatInches(config.monitorWidthIn);
+  viewDistanceInput.value = formatInches(config.viewDistanceIn);
+  vergenceModeInput.value = normalizeVergenceMode(config.vergenceMode);
+  visualPresetInput.value = normalizeVisualPreset(config.visualPreset);
+  startPdInput.value = String(config.startPd);
+  goalPdInput.value = String(config.goalPd);
+  sessionMinutesInput.value = String(config.sessionMinutes);
+  roundSecondsInput.value = String(config.roundSeconds);
+}
+
+function getPersistedMonitorWidthConfirmed(persisted) {
+  if (!persisted || typeof persisted !== "object") return false;
+  if (typeof persisted.monitorWidthConfirmed === "boolean") {
+    return persisted.monitorWidthConfirmed;
+  }
+  // Backward-compatible: existing saved monitor width counts as confirmed.
+  return Number.isFinite(persisted.monitorWidthIn);
+}
+
+function syncMonitorWidthSetupUi() {
+  const needsWidth = !state.monitorWidthConfirmed;
+  if (advancedSetupEl instanceof HTMLDetailsElement) {
+    advancedSetupEl.classList.toggle("needs-attention", needsWidth);
+    if (needsWidth) {
+      advancedSetupEl.open = true;
+    }
+  }
+}
+
+function updateReadyStatus(config) {
+  const readyText =
+    `Ready: ${config.sessionMinutes} min, round ${config.roundSeconds}s, ` +
+    `start ${formatPd(state.currentPd)}Δ, session target ${formatPd(config.goalPd)}Δ, ` +
+    `mode ${formatVergenceLabel(config.vergenceMode)}, visual ${formatVisualPresetLabel(config.visualPreset)}.`;
+
+  if (!state.monitorWidthConfirmed) {
+    updateStatus(
+      `Set Monitor Width once in Advanced Settings for accurate PD estimation. ${readyText}`,
+      true
+    );
+    return;
+  }
+
+  updateStatus(readyText);
+}
+
+function getCurrentTotalSplitPx() {
+  return getBackgroundDisparity(state.difficultySteps) + getSquareDisparity(state.difficultySteps);
+}
+
+function formatSplitPx(splitPx) {
+  return `${splitPx.toFixed(0)} px`;
+}
+
+function updateSplitReadouts() {
+  const splitText = formatSplitPx(getCurrentTotalSplitPx());
+  lrSplitInput.value = splitText;
+  pauseLrSplitEl.textContent = splitText;
+}
+
+function focusMonitorWidthInput() {
+  if (advancedSetupEl instanceof HTMLDetailsElement) {
+    advancedSetupEl.open = true;
+  }
+  monitorWidthInput.focus();
+  monitorWidthInput.select();
+}
+
+function setInputsDisabled(disabled) {
+  monitorWidthInput.disabled = disabled;
+  viewDistanceInput.disabled = disabled;
+  vergenceModeInput.disabled = disabled;
+  visualPresetInput.disabled = disabled;
+  startPdInput.disabled = disabled;
+  goalPdInput.disabled = disabled;
+  sessionMinutesInput.disabled = disabled;
+  roundSecondsInput.disabled = disabled;
+  lrSplitInput.disabled = false;
+}
+
+function refreshIdlePreview() {
+  const config = readConfigInputs();
+  applyConfigInputs(config);
+  applyConfigToState(config);
+  state.paused = false;
+  state.nowTs = performance.now();
+  state.lastResponseTs = state.nowTs;
+  setStartButtonLabel();
+
+  updateReadyStatus(config);
+  updateHud();
+  renderScene();
+  hideSummaryCard();
+}
+
+function applyConfigToState(config) {
+  state.goalPd = config.goalPd;
+  state.vergenceMode = config.vergenceMode;
+  state.visualPreset = config.visualPreset;
+  state.visualTuning = getVisualPresetTuning(config.visualPreset);
+  state.monitorWidthIn = config.monitorWidthIn;
+  state.viewDistanceIn = config.viewDistanceIn;
+  state.difficultySteps = pdToDifficultySteps(config.startPd, config.monitorWidthIn, config.viewDistanceIn);
+  state.currentPd = difficultyToPd(state.difficultySteps, state.monitorWidthIn, state.viewDistanceIn);
+  state.bestPd = state.currentPd;
+  state.sessionDurationMs = config.sessionMinutes * 60_000;
+  state.roundDurationMs = config.roundSeconds * 1000;
+  state.roundVergence = resolveRoundVergence(config.vergenceMode, 1);
+  state.dots = buildDotField(INITIAL_DOT_COUNT, 220, state.roundSeed || 1001, state.visualTuning);
+}
+
+function applyDifficultyDelta(deltaSteps) {
+  const beforePd = difficultyToPd(state.difficultySteps, state.monitorWidthIn, state.viewDistanceIn);
+  const maxDifficultySteps = pdToDifficultySteps(ABSOLUTE_PD_MAX, state.monitorWidthIn, state.viewDistanceIn);
+  state.difficultySteps = Math.min(maxDifficultySteps, Math.max(0, state.difficultySteps + deltaSteps));
+  state.currentPd = difficultyToPd(state.difficultySteps, state.monitorWidthIn, state.viewDistanceIn);
+  state.bestPd = Math.max(state.bestPd, state.currentPd);
+  return state.currentPd - beforePd;
+}
+
+function pauseSessionForInactivity() {
+  if (!state.running) return;
+
+  state.running = false;
+  state.paused = true;
+  state.nowTs = performance.now();
+  stopRoundTicker();
+
+  setStartButtonLabel();
+  syncSessionLayoutMode();
+  beep(720, 160);
+  updateStatus("Auto-paused after 5 minutes without input. Press Resume to continue.", true);
+  updateHud();
+}
+
+function pauseSessionByUser(message) {
+  if (!state.running) return;
+
+  state.running = false;
+  state.paused = true;
+  state.nowTs = performance.now();
+  stopRoundTicker();
+
+  setStartButtonLabel();
+  syncSessionLayoutMode();
+  updateStatus(message);
+  updateHud();
+}
+
+function resumeSession() {
+  if (!state.paused) return;
+
+  const now = performance.now();
+  const sessionRemainingMs = Math.max(0, state.sessionEndTs - state.nowTs);
+  if (sessionRemainingMs <= 0) {
+    state.running = true;
+    state.paused = false;
+    state.nowTs = now;
+    endSession();
+    return;
+  }
+
+  state.running = true;
+  state.paused = false;
+  const roundRemainingMs = Math.max(250, state.roundEndTs - state.nowTs);
+
+  state.nowTs = now;
+  state.sessionEndTs = now + sessionRemainingMs;
+  state.roundStartTs = now;
+  state.roundEndTs = now + roundRemainingMs;
+  state.lastResponseTs = now;
+
+  setInputsDisabled(true);
+  setStartButtonLabel();
+  syncSessionLayoutMode();
+  updateStatus("Session resumed.");
+  startRoundTicker();
+  updateHud();
+  renderScene();
+}
+
+async function resumeSessionWithFullscreen() {
+  if (!state.paused) return;
+  await requestFullscreenOnStart();
+  resumeSession();
+}
+
+function clampInt(value, min, max, fallback) {
+  if (Number.isNaN(value)) return fallback;
+  return Math.min(max, Math.max(min, value));
+}
+
+function clampFloat(value, min, max, fallback) {
+  if (Number.isNaN(value)) return fallback;
+  return Math.min(max, Math.max(min, value));
+}
+
+function sanitizePresetFloat(value, min, max, fallback) {
+  if (!Number.isFinite(value)) return fallback;
+  return Math.min(max, Math.max(min, value));
+}
+
+function sanitizePresetInt(value, min, max, fallback) {
+  if (!Number.isFinite(value)) return fallback;
+  return Math.min(max, Math.max(min, Math.trunc(value)));
+}
+
+function formatInches(value) {
+  return Number.isInteger(value) ? String(value) : value.toFixed(1);
+}
+
+function normalizeVergenceMode(value) {
+  if (VERGENCE_MODE_MAP.has(value)) return value;
+  return DEFAULT_VERGENCE_MODE;
+}
+
+function normalizeVisualPreset(value) {
+  if (VISUAL_PRESET_MAP.has(value)) return value;
+  return DEFAULT_VISUAL_PRESET_VALUE;
+}
+
+function populateVergenceModeInput() {
+  const current = normalizeVergenceMode(vergenceModeInput.value);
+  vergenceModeInput.replaceChildren();
+
+  for (const mode of VERGENCE_MODES) {
+    const option = document.createElement("option");
+    option.value = mode.value;
+    option.textContent = mode.label;
+    vergenceModeInput.append(option);
+  }
+
+  vergenceModeInput.value = current;
+  if (vergenceModeInput.value !== current) {
+    vergenceModeInput.value = DEFAULT_VERGENCE_MODE;
+  }
+}
+
+function populateVisualPresetInput() {
+  const current = normalizeVisualPreset(visualPresetInput.value);
+  visualPresetInput.replaceChildren();
+
+  for (const preset of VISUAL_PRESETS) {
+    const option = document.createElement("option");
+    option.value = preset.value;
+    option.textContent = preset.label;
+    visualPresetInput.append(option);
+  }
+
+  visualPresetInput.value = current;
+  if (visualPresetInput.value !== current) {
+    visualPresetInput.value = DEFAULT_VISUAL_PRESET_VALUE;
+  }
+}
+
+function getVisualPresetTuning(value) {
+  const normalized = normalizeVisualPreset(value);
+  return VISUAL_PRESET_MAP.get(normalized)?.tuning || FALLBACK_VISUAL_PRESET_TUNING;
+}
+
+function normalizeVisualPresetConfig(preset) {
+  const value = typeof preset?.value === "string" ? preset.value.trim() : "";
+  if (!value) return null;
+
+  const label = typeof preset?.label === "string" && preset.label.trim() ? preset.label : value;
+  const source = preset?.tuning && typeof preset.tuning === "object" ? preset.tuning : {};
+
+  let backgroundSplitRatio = sanitizePresetFloat(source.backgroundSplitRatio, 0.05, 0.95, BACKGROUND_SPLIT_RATIO);
+  let squareSplitRatio = sanitizePresetFloat(source.squareSplitRatio, 0.05, 0.95, SQUARE_SPLIT_RATIO);
+  const ratioTotal = backgroundSplitRatio + squareSplitRatio;
+  if (ratioTotal > 0) {
+    backgroundSplitRatio /= ratioTotal;
+    squareSplitRatio /= ratioTotal;
+  } else {
+    backgroundSplitRatio = BACKGROUND_SPLIT_RATIO;
+    squareSplitRatio = SQUARE_SPLIT_RATIO;
+  }
+
+  const targetPopSizePx = sanitizePresetInt(source.targetPopSizePx, 0, 6, TARGET_POP_SIZE_PX);
+  const targetPopAlphaScale = sanitizePresetFloat(source.targetPopAlphaScale, 1, 1.35, TARGET_POP_ALPHA_SCALE);
+  const dotMediumThreshold = sanitizePresetFloat(source.dotMediumThreshold, 0, 1, DOT_MEDIUM_THRESHOLD);
+  const dotLargeThreshold = Math.max(
+    dotMediumThreshold,
+    sanitizePresetFloat(source.dotLargeThreshold, 0, 1, DOT_LARGE_THRESHOLD)
+  );
+  const dotSmallSizePx = sanitizePresetInt(source.dotSmallSizePx, 1, 6, DOT_SMALL_SIZE_PX);
+  const dotMediumSizePx = Math.max(
+    dotSmallSizePx,
+    sanitizePresetInt(source.dotMediumSizePx, 1, 6, DOT_MEDIUM_SIZE_PX)
+  );
+  const dotLargeSizePx = Math.max(
+    dotMediumSizePx,
+    sanitizePresetInt(source.dotLargeSizePx, 1, 8, DOT_LARGE_SIZE_PX)
+  );
+
+  return Object.freeze({
+    value,
+    label,
+    tuning: Object.freeze({
+      backgroundSplitRatio,
+      squareSplitRatio,
+      targetPopSizePx,
+      targetPopAlphaScale,
+      dotMediumThreshold,
+      dotLargeThreshold,
+      dotSmallSizePx,
+      dotMediumSizePx,
+      dotLargeSizePx
+    })
+  });
+}
+
+function resolveRoundVergence(vergenceMode, round) {
+  const normalized = normalizeVergenceMode(vergenceMode);
+  if (normalized === "alternate") {
+    return round % 2 === 0 ? "divergence" : "convergence";
+  }
+  return normalized === "divergence" ? "divergence" : "convergence";
+}
+
+function getVergenceSign(roundVergence) {
+  return roundVergence === "divergence" ? -1 : 1;
+}
+
+function formatVergenceLabel(mode) {
+  const normalized = normalizeVergenceMode(mode);
+  return VERGENCE_MODE_MAP.get(normalized)?.label || "Convergence";
+}
+
+function formatVisualPresetLabel(value) {
+  const normalized = normalizeVisualPreset(value);
+  return VISUAL_PRESET_MAP.get(normalized)?.label || "Balanced";
+}
+
+function difficultyToPd(difficultySteps, monitorWidthIn, viewDistanceIn) {
+  const totalSplitPx = getTotalSplitPx(difficultySteps);
+  const relativeSplitPx = Math.max(0, totalSplitPx - BASE_TOTAL_SPLIT_PX);
+  return splitPxToPd(relativeSplitPx, monitorWidthIn, viewDistanceIn);
+}
+
+function pdToDifficultySteps(targetPd, monitorWidthIn, viewDistanceIn) {
+  const relativeSplitPx = Math.max(0, pdToSplitPx(targetPd, monitorWidthIn, viewDistanceIn));
+  return relativeSplitPx / SPLIT_GAIN_PX_PER_STEP;
+}
+
+function splitPxToPd(splitPx, monitorWidthIn, viewDistanceIn) {
+  const mmPerPx = getMmPerPixel(monitorWidthIn);
+  const distanceM = viewDistanceIn * 0.0254;
+  if (mmPerPx <= 0 || distanceM <= 0) return 0;
+
+  const displacementCm = (splitPx * mmPerPx) / 10;
+  return displacementCm / distanceM;
+}
+
+function pdToSplitPx(pd, monitorWidthIn, viewDistanceIn) {
+  const mmPerPx = getMmPerPixel(monitorWidthIn);
+  const distanceM = viewDistanceIn * 0.0254;
+  if (mmPerPx <= 0 || distanceM <= 0) return 0;
+
+  const displacementCm = pd * distanceM;
+  const displacementMm = displacementCm * 10;
+  return displacementMm / mmPerPx;
+}
+
+function getMmPerPixel(monitorWidthIn) {
+  const screenWidthPx = getScreenWidthPx();
+  if (screenWidthPx <= 0) return 0;
+  return (monitorWidthIn * 25.4) / screenWidthPx;
+}
+
+function getScreenWidthPx() {
+  return Math.max(1, window.screen?.width || window.innerWidth || 1920);
+}
+
+function getTotalSplitPx(difficultySteps) {
+  const safeSteps = Math.max(0, difficultySteps);
+  return BASE_TOTAL_SPLIT_PX + safeSteps * SPLIT_GAIN_PX_PER_STEP;
+}
+
+function getBackgroundDisparity(difficultySteps) {
+  const ratio = state.visualTuning?.backgroundSplitRatio ?? BACKGROUND_SPLIT_RATIO;
+  return getTotalSplitPx(difficultySteps) * ratio;
+}
+
+function getSquareDisparity(difficultySteps) {
+  const ratio = state.visualTuning?.squareSplitRatio ?? SQUARE_SPLIT_RATIO;
+  return getTotalSplitPx(difficultySteps) * ratio;
+}
+
+function renderScene() {
+  const w = canvas.width;
+  const h = canvas.height;
+  const cx = w * 0.5;
+  const cy = h * 0.5;
+  const trainingActive = isTrainingActive();
+  const fieldRadius = getFieldRadius();
+  const roundVergence = trainingActive ? state.roundVergence : resolveRoundVergence(state.vergenceMode, 1);
+  const vergenceSign = getVergenceSign(roundVergence);
+
+  ctx.clearRect(0, 0, w, h);
+  drawBackdrop(ctx, w, h);
+
+  const backgroundDisparity = getBackgroundDisparity(state.difficultySteps);
+  const squareDisparity = getSquareDisparity(state.difficultySteps);
+  const leftCx = cx - backgroundDisparity * 0.5 * vergenceSign;
+  const rightCx = cx + backgroundDisparity * 0.5 * vergenceSign;
+
+  drawStereoFieldGlow(ctx, leftCx, rightCx, cy, fieldRadius);
+  drawRandomDotStereoSquare(
+    ctx,
+    state.dots,
+    leftCx,
+    rightCx,
+    cy,
+    fieldRadius,
+    squareDisparity,
+    vergenceSign,
+    trainingActive ? state.targetSide : "up",
+    trainingActive
+  );
+}
+
+function drawStereoFieldGlow(context, leftCx, rightCx, cy, radius) {
+  context.fillStyle = "rgba(255, 64, 64, 0.09)";
+  context.beginPath();
+  context.arc(leftCx, cy, radius * 1.02, 0, Math.PI * 2);
+  context.fill();
+
+  context.fillStyle = "rgba(60, 184, 255, 0.09)";
+  context.beginPath();
+  context.arc(rightCx, cy, radius * 1.02, 0, Math.PI * 2);
+  context.fill();
+}
+
+function drawRandomDotStereoSquare(
+  context,
+  dots,
+  leftCx,
+  rightCx,
+  cy,
+  fieldRadius,
+  squareDisparity,
+  vergenceSign,
+  side,
+  showSquare = true
+) {
+  const squareOffset = fieldRadius * TARGET_OFFSET_RATIO;
+  const squareHalf = fieldRadius * TARGET_HALF_SIZE_RATIO;
+  const targetPopSizePx = Math.max(0, Math.round(state.visualTuning?.targetPopSizePx ?? TARGET_POP_SIZE_PX));
+  const targetPopAlphaScale = Math.max(1, state.visualTuning?.targetPopAlphaScale ?? TARGET_POP_ALPHA_SCALE);
+  const center = getSideCenter(side, squareOffset);
+  const rawShiftPerEye = showSquare ? squareDisparity * 0.5 * vergenceSign : 0;
+  const maxHorizontalShift = Math.max(0, fieldRadius - (Math.abs(center.x) + squareHalf + TARGET_EDGE_PADDING_PX));
+  const shiftPerEye = Math.sign(rawShiftPerEye) * Math.min(Math.abs(rawShiftPerEye), maxHorizontalShift);
+
+  for (let i = 0; i < dots.length; i += 1) {
+    const dot = dots[i];
+    const insideField = dot.x * dot.x + dot.y * dot.y <= fieldRadius * fieldRadius;
+    if (!insideField) continue;
+
+    const insideSquare =
+      showSquare &&
+      Math.abs(dot.x - center.x) <= squareHalf &&
+      Math.abs(dot.y - center.y) <= squareHalf;
+
+    const y = cy + dot.y;
+    let lx = leftCx + dot.x;
+    let rx = rightCx + dot.x;
+    if (insideSquare) {
+      const localX = dot.x - center.x;
+      const leftLocalX = wrapInsideSquare(localX - shiftPerEye, squareHalf);
+      const rightLocalX = wrapInsideSquare(localX + shiftPerEye, squareHalf);
+      lx = leftCx + center.x + leftLocalX;
+      rx = rightCx + center.x + rightLocalX;
+    }
+    const size = insideSquare ? dot.r + targetPopSizePx : dot.r;
+    context.globalAlpha = insideSquare ? targetPopAlphaScale : 1;
+
+    context.fillStyle = LEFT_DOT_COLOR;
+    context.fillRect(lx, y, size, size);
+    context.fillStyle = RIGHT_DOT_COLOR;
+    context.fillRect(rx, y, size, size);
+  }
+
+  context.globalAlpha = 1;
+}
+
+function getSideCenter(side, distance) {
+  if (side === "up") return { x: 0, y: -distance };
+  if (side === "right") return { x: distance, y: 0 };
+  if (side === "down") return { x: 0, y: distance };
+  return { x: -distance, y: 0 };
+}
+
+function wrapInsideSquare(localX, squareHalf) {
+  const span = squareHalf * 2;
+  if (span <= 0) return localX;
+  const normalized = ((localX + squareHalf) % span + span) % span;
+  return normalized - squareHalf;
+}
+
+function getFieldRadius() {
+  return Math.min(canvas.width, canvas.height) * 0.34;
+}
+
+function drawBackdrop(context, width, height) {
+  context.fillStyle = "#000000";
+  context.fillRect(0, 0, width, height);
+}
+
+function buildDotField(count, range, seed, visualTuning = FALLBACK_VISUAL_PRESET_TUNING) {
+  const dots = [];
+  const rand = createRng(seed);
+  const mediumThreshold = Math.min(1, Math.max(0, visualTuning.dotMediumThreshold ?? DOT_MEDIUM_THRESHOLD));
+  const largeThreshold = Math.min(1, Math.max(mediumThreshold, visualTuning.dotLargeThreshold ?? DOT_LARGE_THRESHOLD));
+  const smallSize = Math.max(1, Math.round(visualTuning.dotSmallSizePx ?? DOT_SMALL_SIZE_PX));
+  const mediumSize = Math.max(smallSize, Math.round(visualTuning.dotMediumSizePx ?? DOT_MEDIUM_SIZE_PX));
+  const largeSize = Math.max(mediumSize, Math.round(visualTuning.dotLargeSizePx ?? DOT_LARGE_SIZE_PX));
+
+  for (let i = 0; i < count; i += 1) {
+    const x = (rand() * 2 - 1) * range;
+    const y = (rand() * 2 - 1) * range;
+    const sizeRoll = rand();
+    let r = smallSize;
+    if (sizeRoll > largeThreshold) r = largeSize;
+    else if (sizeRoll > mediumThreshold) r = mediumSize;
+    dots.push({ x, y, r });
+  }
+
+  return dots;
+}
+
+function createRng(seed) {
+  let s = seed >>> 0;
+  return () => {
+    s = (s * 1664525 + 1013904223) >>> 0;
+    return s / 4294967296;
+  };
+}
+
+function updateHud() {
+  state.currentPd = difficultyToPd(state.difficultySteps, state.monitorWidthIn, state.viewDistanceIn);
+  scoreEl.textContent = String(state.score);
+  prismEl.textContent = `${formatPd(state.currentPd)}Δ`;
+  goalPdHudEl.textContent = `${formatPd(state.goalPd)}Δ`;
+  roundEl.textContent = String(state.round);
+  const trainingActive = isTrainingActive();
+
+  let roundTimeLeft = state.roundDurationMs;
+  if (trainingActive && state.roundEndTs > 0) {
+    roundTimeLeft = Math.max(0, state.roundEndTs - state.nowTs);
+  }
+  timerEl.textContent = `${(roundTimeLeft / 1000).toFixed(1)}s`;
+
+  let sessionLeft = state.sessionDurationMs;
+  if (trainingActive && state.sessionEndTs > 0) {
+    sessionLeft = Math.max(0, state.sessionEndTs - state.nowTs);
+  }
+  sessionTimerEl.textContent = formatClock(sessionLeft);
+  updateSplitReadouts();
+  updateDebugStatus();
+}
+
+function formatClock(ms) {
+  const totalSeconds = Math.ceil(Math.max(0, ms) / 1000);
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
+}
+
+function formatPd(pd) {
+  return pd.toFixed(1);
+}
+
+function requestFullscreenOnStart() {
+  if (document.fullscreenElement) return Promise.resolve();
+
+  const target = document.documentElement;
+  const request =
+    target.requestFullscreen ||
+    target.webkitRequestFullscreen ||
+    target.mozRequestFullScreen ||
+    target.msRequestFullscreen;
+
+  if (!request) return Promise.resolve();
+
+  try {
+    const result = request.call(target);
+    if (result && typeof result.then === "function") {
+      return result.catch(() => {});
+    }
+    return Promise.resolve();
+  } catch {
+    return Promise.resolve();
+  }
+}
+
+function exitFullscreenIfActive() {
+  if (!isFullscreenActive()) return Promise.resolve();
+
+  const exit =
+    document.exitFullscreen ||
+    document.webkitExitFullscreen ||
+    document.mozCancelFullScreen ||
+    document.msExitFullscreen;
+
+  if (!exit) return Promise.resolve();
+
+  try {
+    const result = exit.call(document);
+    if (result && typeof result.then === "function") {
+      return result.catch(() => {});
+    }
+    return Promise.resolve();
+  } catch {
+    return Promise.resolve();
+  }
+}
+
+function isFullscreenActive() {
+  return Boolean(
+    document.fullscreenElement ||
+      document.webkitFullscreenElement ||
+      document.mozFullScreenElement ||
+      document.msFullscreenElement
+  );
+}
+
+function onFullscreenChange() {
+  const fullscreenNow = isFullscreenActive();
+  const exitedFullscreenDuringRun = wasFullscreenActive && !fullscreenNow && state.running;
+  wasFullscreenActive = fullscreenNow;
+
+  syncSessionLayoutMode();
+
+  if (exitedFullscreenDuringRun) {
+    pauseSessionByUser("Press Resume or P to continue.");
+  }
+}
+
+function syncSessionLayoutMode() {
+  const trainingActive = isTrainingActive();
+  document.body.classList.toggle("debug-mode", DEBUG_MODE);
+  document.body.classList.toggle("training-live", trainingActive);
+  document.body.classList.toggle("session-active", trainingActive && isFullscreenActive());
+  syncPauseCard();
+}
+
+function setStartButtonLabel() {
+  if (state.running) {
+    startBtn.textContent = "Running...";
+    startBtn.disabled = true;
+    return;
+  }
+
+  startBtn.textContent = state.paused ? "Resume" : "Start";
+  startBtn.disabled = false;
+}
+
+function syncPauseCard() {
+  if (!state.paused) {
+    pauseCardEl.hidden = true;
+    return;
+  }
+
+  pauseExerciseNameEl.textContent = EXERCISE_LABEL;
+  pauseVergenceModeEl.textContent = formatPauseVergenceLabel();
+  pauseLrSplitEl.textContent = formatSplitPx(getCurrentTotalSplitPx());
+  pauseCardEl.hidden = false;
+}
+
+function formatPauseVergenceLabel() {
+  const configured = normalizeVergenceMode(state.vergenceMode);
+  const configuredLabel = formatVergenceLabel(configured);
+  if (configured !== "alternate") {
+    return configuredLabel;
+  }
+
+  const currentRoundLabel = formatVergenceLabel(resolveRoundVergence(configured, state.round || 1));
+  return `${configuredLabel} (current round: ${currentRoundLabel})`;
+}
+
+function hideSummaryCard() {
+  summaryCardEl.classList.add("hidden");
+}
+
+function showSummaryCard(reachedGoal) {
+  sumResultEl.textContent = reachedGoal ? "Target Met" : "Target Not Met";
+  sumBestPdEl.textContent = `${formatPd(state.bestPd)}Δ`;
+  sumGoalPdEl.textContent = `${formatPd(state.goalPd)}Δ`;
+  sumScoreEl.textContent = String(state.score);
+  sumRoundsEl.textContent = String(state.round);
+  sumDurationEl.textContent = formatClock(state.sessionDurationMs);
+  sumCorrectEl.textContent = String(state.correctCount);
+  sumWrongEl.textContent = String(state.wrongCount);
+  sumTimeoutsEl.textContent = String(state.timeoutCount);
+  sumSkipsEl.textContent = String(state.skipCount);
+  summaryCardEl.classList.remove("hidden");
+}
+
+function updateStatus(text, danger = false) {
+  statusEl.textContent = text;
+  statusEl.classList.toggle("danger", danger);
+}
+
+function setRoundDebugState(eventName, inputSide, targetSide, difficultyDeltaPd) {
+  state.lastRoundEvent = eventName;
+  state.lastInputSide = inputSide;
+  state.lastTargetSide = targetSide;
+  state.lastDifficultyDeltaPd = difficultyDeltaPd;
+}
+
+function updateDebugStatus() {
+  if (!debugStatusEl) return;
+  if (!DEBUG_MODE) {
+    debugStatusEl.hidden = true;
+    debugStatusEl.textContent = "";
+    return;
+  }
+
+  const runState = state.running ? "running" : state.paused ? "paused" : "idle";
+  const delta = state.lastDifficultyDeltaPd;
+  const deltaText = `${delta >= 0 ? "+" : ""}${delta.toFixed(1)}Δ`;
+  const text = [
+    `debug=${runState}`,
+    `round=${state.round}`,
+    `event=${state.lastRoundEvent}`,
+    `input=${state.lastInputSide}`,
+    `target=${state.lastTargetSide}`,
+    `delta=${deltaText}`,
+    `pd=${formatPd(state.currentPd)}Δ`,
+    `steps=${state.difficultySteps.toFixed(2)}`
+  ].join("  |  ");
+
+  debugStatusEl.hidden = false;
+  debugStatusEl.textContent = text;
+}
+
+function readUrlFlags() {
+  const params = new URLSearchParams(window.location.search);
+  return {
+    debug: parseBooleanFlag(params.get("debug")),
+    clearSettings: parseBooleanFlag(params.get("clearSettings")) || parseBooleanFlag(params.get("reset"))
+  };
+}
+
+function parseBooleanFlag(value) {
+  if (value === null) return false;
+  const normalized = value.trim().toLowerCase();
+  return normalized === "" || normalized === "1" || normalized === "true" || normalized === "yes" || normalized === "on";
+}
+
+function clearOneShotUrlFlags() {
+  try {
+    const url = new URL(window.location.href);
+    const params = url.searchParams;
+    const hasOneShot = params.has("clearSettings") || params.has("reset");
+    if (!hasOneShot) return;
+
+    params.delete("clearSettings");
+    params.delete("reset");
+
+    const search = params.toString();
+    const nextUrl = `${url.pathname}${search ? `?${search}` : ""}${url.hash}`;
+    window.history.replaceState(window.history.state, "", nextUrl);
+  } catch {
+    // Ignore URL rewrite failures in restricted browser contexts.
+  }
+}
+
+function ensureAudioContext() {
+  if (!audioCtx) {
+    const AudioContextCtor = window.AudioContext || window.webkitAudioContext;
+    if (!AudioContextCtor) return;
+    audioCtx = new AudioContextCtor();
+  }
+}
+
+function beep(freq, durationMs) {
+  if (!audioCtx) return;
+  if (audioCtx.state === "suspended") {
+    audioCtx.resume();
+  }
+
+  const osc = audioCtx.createOscillator();
+  const gain = audioCtx.createGain();
+  osc.frequency.value = freq;
+  osc.type = "square";
+  gain.gain.value = 0.0001;
+  osc.connect(gain).connect(audioCtx.destination);
+
+  const now = audioCtx.currentTime;
+  gain.gain.exponentialRampToValueAtTime(0.08, now + 0.01);
+  gain.gain.exponentialRampToValueAtTime(0.0001, now + durationMs / 1000);
+  osc.start(now);
+  osc.stop(now + durationMs / 1000 + 0.02);
+}
+
+function playPositiveFeedbackBeep() {
+  beep(700, 90);
+  setTimeout(() => beep(880, 110), 95);
+}
+
+function playNegativeFeedbackBeep() {
+  beep(320, 95);
+  setTimeout(() => beep(220, 125), 98);
+}
+
+function isTrainingActive() {
+  return state.running || state.paused;
+}
+
+function stopRoundTicker() {
+  if (tickIntervalId !== null) {
+    clearInterval(tickIntervalId);
+    tickIntervalId = null;
+  }
+}
