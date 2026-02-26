@@ -16,6 +16,8 @@ Browser-based vergence training prototype using red/cyan anaglyph random-dot ste
 - `P` = pause/resume.
 - `Esc` exits fullscreen and pauses.
 - Scoring: correct = `+1`; wrong / timeout / space = `-1`.
+- Scores are tracked per exercise (for example separate convergence/divergence scores in alternating mode).
+- HUD score is exercise-scoped; alternating sessions show per-exercise score codes (for example `C:3 D:-1`).
 - Session summary is shown at the end.
 
 ## Session Setup
@@ -33,7 +35,7 @@ When paused (for example after `Esc`):
 
 ## Modes and Presets
 
-- Vergence modes: `Convergence`, `Divergence`, `Alternate`.
+- Vergence modes: `Convergence`, `Divergence`, `Jump Vergence (Alternating)`.
 - Visual presets (from `config.js`):
   - `Balanced (Default)`
   - `More Obvious`
