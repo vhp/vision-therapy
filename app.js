@@ -55,7 +55,7 @@ const {
 const FALLBACK_VERGENCE_MODES = Object.freeze([
   { value: "convergence", label: "Convergence" },
   { value: "divergence", label: "Divergence" },
-  { value: "alternate", label: "Alternate" }
+  { value: "alternate", label: "Jump Vergence (Alternating)" }
 ]);
 
 const VERGENCE_MODES = Object.freeze(
@@ -72,8 +72,10 @@ if (VERGENCE_MODES.length === 0) {
   throw new Error("APP_CONFIG.VERGENCE_MODES must include at least one mode.");
 }
 
-const DEFAULT_VERGENCE_MODE = VERGENCE_MODES[0].value;
 const VERGENCE_MODE_MAP = new Map(VERGENCE_MODES.map(mode => [mode.value, mode]));
+const DEFAULT_VERGENCE_MODE = VERGENCE_MODE_MAP.has("convergence")
+  ? "convergence"
+  : VERGENCE_MODES[0].value;
 
 const FALLBACK_VISUAL_PRESET_TUNING = Object.freeze({
   backgroundSplitRatio: BACKGROUND_SPLIT_RATIO,
@@ -155,6 +157,7 @@ const sumResultEl = document.getElementById("sumResult");
 const sumBestPdEl = document.getElementById("sumBestPd");
 const sumGoalPdEl = document.getElementById("sumGoalPd");
 const sumScoreEl = document.getElementById("sumScore");
+const sumExerciseScoresEl = document.getElementById("sumExerciseScores");
 const sumRoundsEl = document.getElementById("sumRounds");
 const sumDurationEl = document.getElementById("sumDuration");
 const sumCorrectEl = document.getElementById("sumCorrect");
@@ -193,6 +196,7 @@ if (
   !sumBestPdEl ||
   !sumGoalPdEl ||
   !sumScoreEl ||
+  !sumExerciseScoresEl ||
   !sumRoundsEl ||
   !sumDurationEl ||
   !sumCorrectEl ||
@@ -221,6 +225,7 @@ const state = {
   wrongCount: 0,
   skipCount: 0,
   timeoutCount: 0,
+  metricsByExercise: Object.create(null),
   sessionDurationMs: DEFAULT_SESSION_MINUTES * 60_000,
   roundDurationMs: DEFAULT_ROUND_SECONDS * 1000,
   round: 0,
@@ -295,12 +300,8 @@ function startSession() {
 
   state.running = true;
   state.paused = false;
-  state.score = 0;
+  resetScoringState();
   applyConfigToState(config);
-  state.correctCount = 0;
-  state.wrongCount = 0;
-  state.skipCount = 0;
-  state.timeoutCount = 0;
   state.round = 0;
   state.roundVergence = resolveRoundVergence(config.vergenceMode, 1);
 
@@ -328,12 +329,8 @@ function resetSession() {
 
   state.running = false;
   state.paused = false;
-  state.score = 0;
+  resetScoringState();
   applyConfigToState(config);
-  state.correctCount = 0;
-  state.wrongCount = 0;
-  state.skipCount = 0;
-  state.timeoutCount = 0;
   state.round = 0;
   state.roundVergence = resolveRoundVergence(config.vergenceMode, 1);
   state.targetSide = "up";
@@ -445,12 +442,11 @@ function handleRoundTimeout() {
 
   stopRoundTicker();
 
-  state.score -= 1;
-  state.timeoutCount += 1;
+  const timeoutScore = recordScoringEvent("timeout", state.roundVergence);
   const pdDelta = applyDifficultyDelta(-PD_LOSS_PER_ERROR);
   setRoundDebugState("timeout", "-", state.targetSide, pdDelta);
   playNegativeFeedbackBeep();
-  updateStatus("Round timeout. Score -1.", true);
+  updateStatus(`Round timeout (${formatExerciseLabel(timeoutScore.exerciseKey)}). Score -1.`, true);
   updateHud();
 
   setTimeout(() => {
@@ -472,12 +468,11 @@ function onKeyDown(event) {
   if (event.code === "Space") {
     event.preventDefault();
     state.lastResponseTs = performance.now();
-    state.score -= 1;
-    state.skipCount += 1;
+    const skipScore = recordScoringEvent("skip", state.roundVergence);
     const pdDelta = applyDifficultyDelta(-PD_LOSS_PER_ERROR);
     setRoundDebugState("skip", "space", state.targetSide, pdDelta);
     playNegativeFeedbackBeep();
-    updateStatus("Marked unseen. Score -1. New stereogram.", true);
+    updateStatus(`Marked unseen (${formatExerciseLabel(skipScore.exerciseKey)}). Score -1. New stereogram.`, true);
     updateHud();
     startRound();
     return;
@@ -491,24 +486,26 @@ function onKeyDown(event) {
   const correct = side === state.targetSide;
 
   if (correct) {
-    state.score += 1;
-    state.correctCount += 1;
+    const correctScore = recordScoringEvent("correct", state.roundVergence);
     const pdDelta = applyDifficultyDelta(PD_GAIN_PER_CORRECT);
     setRoundDebugState("correct", side, state.targetSide, pdDelta);
     playPositiveFeedbackBeep();
 
     if (state.bestPd >= state.goalPd) {
-      updateStatus(`Correct (${side}). Score +1. Session target reached at ${formatPd(state.bestPd)}Δ.`);
+      updateStatus(
+        `Correct (${side}, ${formatExerciseLabel(correctScore.exerciseKey)}). Score +1. Session target reached at ${formatPd(state.bestPd)}Δ.`
+      );
     } else {
-      updateStatus(`Correct (${side}). Score +1. Current ${formatPd(state.currentPd)}Δ.`);
+      updateStatus(
+        `Correct (${side}, ${formatExerciseLabel(correctScore.exerciseKey)}). Score +1. Current ${formatPd(state.currentPd)}Δ.`
+      );
     }
   } else {
-    state.score -= 1;
-    state.wrongCount += 1;
+    const wrongScore = recordScoringEvent("wrong", state.roundVergence);
     const pdDelta = applyDifficultyDelta(-PD_LOSS_PER_ERROR);
     setRoundDebugState("wrong", side, state.targetSide, pdDelta);
     playNegativeFeedbackBeep();
-    updateStatus(`Wrong (${side}). Score -1.`, true);
+    updateStatus(`Wrong (${side}, ${formatExerciseLabel(wrongScore.exerciseKey)}). Score -1.`, true);
   }
 
   updateHud();
@@ -857,6 +854,131 @@ function applyConfigToState(config) {
   state.roundDurationMs = config.roundSeconds * 1000;
   state.roundVergence = resolveRoundVergence(config.vergenceMode, 1);
   state.dots = buildDotField(INITIAL_DOT_COUNT, 220, state.roundSeed || 1001, state.visualTuning);
+}
+
+function createEmptyExerciseMetrics() {
+  return { score: 0, correct: 0, wrong: 0, skip: 0, timeout: 0 };
+}
+
+function resetScoringState() {
+  state.score = 0;
+  state.correctCount = 0;
+  state.wrongCount = 0;
+  state.skipCount = 0;
+  state.timeoutCount = 0;
+  state.metricsByExercise = Object.create(null);
+}
+
+function normalizeExerciseKey(value) {
+  if (typeof value !== "string") return "";
+  return value.trim().toLowerCase();
+}
+
+function ensureExerciseMetrics(exerciseKey) {
+  const normalized = normalizeExerciseKey(exerciseKey) || "unassigned";
+  if (!state.metricsByExercise[normalized]) {
+    state.metricsByExercise[normalized] = createEmptyExerciseMetrics();
+  }
+  return { key: normalized, metrics: state.metricsByExercise[normalized] };
+}
+
+function recordScoringEvent(outcomeType, exerciseKey) {
+  const { key, metrics } = ensureExerciseMetrics(exerciseKey);
+
+  let scoreDelta = 0;
+  if (outcomeType === "correct") {
+    scoreDelta = 1;
+    state.correctCount += 1;
+    metrics.correct += 1;
+  } else if (outcomeType === "wrong") {
+    scoreDelta = -1;
+    state.wrongCount += 1;
+    metrics.wrong += 1;
+  } else if (outcomeType === "skip") {
+    scoreDelta = -1;
+    state.skipCount += 1;
+    metrics.skip += 1;
+  } else if (outcomeType === "timeout") {
+    scoreDelta = -1;
+    state.timeoutCount += 1;
+    metrics.timeout += 1;
+  }
+
+  state.score += scoreDelta;
+  metrics.score += scoreDelta;
+  return { exerciseKey: key, scoreDelta, exerciseScore: metrics.score, totalScore: state.score };
+}
+
+function getExerciseScore(exerciseKey) {
+  const normalized = normalizeExerciseKey(exerciseKey);
+  if (!normalized) return 0;
+  return state.metricsByExercise[normalized]?.score || 0;
+}
+
+function getExpectedExerciseKeysForMode(mode, sampleRounds = 24) {
+  const keys = new Set();
+  for (let round = 1; round <= sampleRounds; round += 1) {
+    const resolved = normalizeExerciseKey(resolveRoundVergence(mode, round));
+    if (resolved && resolved !== "alternate") {
+      keys.add(resolved);
+    }
+  }
+  return [...keys];
+}
+
+function getTrackedExerciseKeys() {
+  const keys = new Set(Object.keys(state.metricsByExercise));
+  const current = normalizeExerciseKey(state.roundVergence);
+  if (current && current !== "alternate") {
+    keys.add(current);
+  }
+  const expected = getExpectedExerciseKeysForMode(state.vergenceMode);
+  for (const key of expected) {
+    keys.add(key);
+  }
+
+  return [...keys].sort((a, b) => formatExerciseLabel(a).localeCompare(formatExerciseLabel(b)));
+}
+
+function formatExerciseLabel(exerciseKey) {
+  const key = normalizeExerciseKey(exerciseKey);
+  if (!key) return "Unassigned";
+  if (key === "unassigned") return "Unassigned";
+  const configured = VERGENCE_MODE_MAP.get(key);
+  if (configured) {
+    return configured.label;
+  }
+  return key
+    .split(/[_-]+/)
+    .filter(Boolean)
+    .map(part => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+}
+
+function formatExerciseShortCode(exerciseKey) {
+  const key = normalizeExerciseKey(exerciseKey);
+  if (key === "convergence") return "C";
+  if (key === "divergence") return "D";
+  if (key === "unassigned") return "U";
+  const label = formatExerciseLabel(key);
+  return label.slice(0, 3).toUpperCase();
+}
+
+function formatScoreHudText() {
+  const keys = getTrackedExerciseKeys();
+  if (keys.length === 0) {
+    return "0";
+  }
+  if (keys.length === 1) {
+    return String(getExerciseScore(keys[0]));
+  }
+  return keys.map(key => `${formatExerciseShortCode(key)}:${getExerciseScore(key)}`).join(" ");
+}
+
+function formatExerciseScoresSummaryText() {
+  const keys = getTrackedExerciseKeys();
+  if (keys.length === 0) return "None";
+  return keys.map(key => `${formatExerciseLabel(key)} ${getExerciseScore(key)}`).join(" | ");
 }
 
 function applyDifficultyDelta(deltaSteps) {
@@ -1290,7 +1412,7 @@ function createRng(seed) {
 
 function updateHud() {
   state.currentPd = difficultyToPd(state.difficultySteps, state.monitorWidthIn, state.viewDistanceIn);
-  scoreEl.textContent = String(state.score);
+  scoreEl.textContent = formatScoreHudText();
   prismEl.textContent = `${formatPd(state.currentPd)}Δ`;
   goalPdHudEl.textContent = `${formatPd(state.goalPd)}Δ`;
   roundEl.textContent = String(state.round);
@@ -1439,6 +1561,7 @@ function showSummaryCard(reachedGoal) {
   sumBestPdEl.textContent = `${formatPd(state.bestPd)}Δ`;
   sumGoalPdEl.textContent = `${formatPd(state.goalPd)}Δ`;
   sumScoreEl.textContent = String(state.score);
+  sumExerciseScoresEl.textContent = formatExerciseScoresSummaryText();
   sumRoundsEl.textContent = String(state.round);
   sumDurationEl.textContent = formatClock(state.sessionDurationMs);
   sumCorrectEl.textContent = String(state.correctCount);
@@ -1474,10 +1597,13 @@ function updateDebugStatus() {
   const text = [
     `debug=${runState}`,
     `round=${state.round}`,
+    `exercise=${formatExerciseLabel(state.roundVergence)}`,
     `event=${state.lastRoundEvent}`,
     `input=${state.lastInputSide}`,
     `target=${state.lastTargetSide}`,
     `delta=${deltaText}`,
+    `scores=${formatScoreHudText()}`,
+    `total=${state.score}`,
     `pd=${formatPd(state.currentPd)}Δ`,
     `steps=${state.difficultySteps.toFixed(2)}`
   ].join("  |  ");
