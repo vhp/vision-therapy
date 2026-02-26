@@ -134,6 +134,12 @@ p {
 
 .core-setup {
   margin-bottom: 12px;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 220px);
+}
+
+.core-setup label[for="vergenceMode"],
+.core-setup #vergenceMode {
+  grid-column: 1 / -1;
 }
 
 .debug-only {
@@ -249,6 +255,16 @@ body.training-live .instructions {
   background-size: 5px 5px, 5px 5px;
   background-repeat: no-repeat;
   padding-right: 30px;
+}
+
+#vergenceMode {
+  white-space: normal;
+  line-height: 1.2;
+  min-height: 2.55rem;
+}
+
+#vergenceMode option {
+  white-space: normal;
 }
 
 .setup-grid input:disabled,
