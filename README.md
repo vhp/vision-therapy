@@ -49,7 +49,7 @@ When paused (for example after `Esc`):
 
 - `?debug=1`
   - Shows debug status line and `+/-` debug difficulty controls.
-  - Keyboard debug difficulty shortcuts: `[` / `]`, `-` / `_`, and `=` / `+`, including during fullscreen sessions.
+  - Keyboard debug difficulty shortcuts: `[` or `-` / `_` for `-1`; `]` or `=` / `+` for `+1`. Works during fullscreen sessions.
   - Shows debug-only `Start PD` input.
 - `?clearSettings=1` or `?reset=1`
   - Clears saved local settings on load.
