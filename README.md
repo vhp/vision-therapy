@@ -23,9 +23,10 @@ Browser-based vergence training prototype using red/cyan anaglyph random-dot ste
 ## Session Setup
 
 - `Core Settings`: `Vergence Mode`, `Visual Preset`, `Session Target PD`, `Session Minutes`.
-- `Advanced Settings`: `Monitor Width`, `View Distance`, `Round Seconds`, `Vertical Mode Mapping`, a read-only `Eye Split` (marked `RO`), and debug-only `Start PD`.
+- `Advanced Settings`: `Monitor Width`, `View Distance`, `Round Seconds`, `Field Shape`, `Vertical Mode Mapping`, a read-only `Eye Split` (marked `RO`), and debug-only `Start PD`.
 - `Monitor Width` is a hard requirement before first start.
 - Once set, monitor width is cached in browser `localStorage` and reused.
+- `Field Shape` changes only the outer stereogram field between `Circle` and `Square`.
 - `Vertical Mode Mapping` lets you flip the `Vergence Up` / `Vergence Down` polarity if clinical testing suggests the opposite convention.
 
 ## Pause UX
@@ -42,6 +43,7 @@ When paused (for example after `Esc`):
   - `Balanced (Default)`
   - `More Obvious`
   - `Fine Dots (Harder)`
+- Outer field shapes: `Circle (Default)`, `Square`.
 
 ## URL Flags
 

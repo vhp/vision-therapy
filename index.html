@@ -120,6 +120,11 @@
               step="1"
               value="20"
             />
+            <label for="fieldShape">Field Shape</label>
+            <select id="fieldShape">
+              <option value="circle">Circle (Default)</option>
+              <option value="square">Square</option>
+            </select>
             <label for="verticalPolarity">Vertical Mode Mapping</label>
             <select id="verticalPolarity">
               <option value="standard">Standard (Up = red up)</option>
@@ -135,6 +140,7 @@
             </li>
             <li class="debug-only"><strong>Start PD:</strong> debug-only value used as the initial PD estimate.</li>
             <li><strong>Round Seconds:</strong> controls the round timer (default 20s). Timeout beeps and scores -1.</li>
+            <li><strong>Field Shape:</strong> changes only the outer stereogram field between `Circle` and `Square`.</li>
             <li><strong>Vertical Mode Mapping:</strong> flips `Vergence Up` / `Vergence Down` polarity if clinical testing suggests the opposite convention.</li>
             <li><strong>Eye Split:</strong> read-only rendering split shown for reference, with `H` or `V` axis tags.</li>
           </ul>
@@ -160,7 +166,7 @@
         <ul class="instructions">
           <li><kbd>Arrow Keys</kbd> = choose side (up/right/down/left)</li>
           <li>
-            You will see overlapping red/cyan circular dot fields. With fusion,
+            You will see overlapping red/cyan dot fields. With fusion,
             a single target appears in depth from binocular disparity (not a
             drawn outline).
           </li>

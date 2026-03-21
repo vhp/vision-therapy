@@ -23,6 +23,7 @@ const {
   DEFAULT_START_PD,
   DEFAULT_GOAL_PD,
   DEFAULT_SESSION_MINUTES,
+  DEFAULT_FIELD_SHAPE = "circle",
   DEFAULT_VISUAL_PRESET,
   ABSOLUTE_PD_MAX,
   ABSOLUTE_SESSION_MINUTES_MAX,
@@ -113,6 +114,8 @@ const DEFAULT_VISUAL_PRESET_VALUE = VISUAL_PRESET_MAP.has(DEFAULT_VISUAL_PRESET)
   ? DEFAULT_VISUAL_PRESET
   : VISUAL_PRESETS[0].value;
 const DEFAULT_VISUAL_TUNING = getVisualPresetTuning(DEFAULT_VISUAL_PRESET_VALUE);
+const DEFAULT_FIELD_SHAPE_VALUE = DEFAULT_FIELD_SHAPE === "square" ? "square" : "circle";
+const FIELD_SHAPE_VALUES = Object.freeze(["circle", "square"]);
 const DEFAULT_VERTICAL_POLARITY = "standard";
 const VERTICAL_POLARITY_VALUES = Object.freeze(["standard", "flipped"]);
 
@@ -155,6 +158,7 @@ const startPdInput = document.getElementById("startPd");
 const goalPdInput = document.getElementById("goalPd");
 const sessionMinutesInput = document.getElementById("sessionMinutes");
 const roundSecondsInput = document.getElementById("roundSeconds");
+const fieldShapeInput = document.getElementById("fieldShape");
 const verticalPolarityInput = document.getElementById("verticalPolarity");
 const lrSplitInput = document.getElementById("lrSplit");
 
@@ -186,6 +190,7 @@ if (
   !goalPdInput ||
   !sessionMinutesInput ||
   !roundSecondsInput ||
+  !fieldShapeInput ||
   !verticalPolarityInput ||
   !lrSplitInput
 ) {
@@ -222,6 +227,7 @@ const state = {
   bestPd: 0,
   goalPd: DEFAULT_GOAL_PD,
   vergenceMode: DEFAULT_VERGENCE_MODE,
+  fieldShape: DEFAULT_FIELD_SHAPE_VALUE,
   verticalPolarity: DEFAULT_VERTICAL_POLARITY,
   visualPreset: DEFAULT_VISUAL_PRESET_VALUE,
   visualTuning: DEFAULT_VISUAL_TUNING,
@@ -246,7 +252,7 @@ const state = {
   sessionEndTs: 0,
   lastResponseTs: performance.now(),
   nowTs: performance.now(),
-  dots: buildDotField(INITIAL_DOT_COUNT, 220, 1001, DEFAULT_VISUAL_TUNING),
+  dots: buildDotField(INITIAL_DOT_COUNT, getFieldExtent(), 1001, DEFAULT_VISUAL_TUNING),
   lastRoundEvent: "idle",
   lastInputSide: "-",
   lastTargetSide: "-",
@@ -283,6 +289,7 @@ startPdInput.addEventListener("change", onConfigChange);
 goalPdInput.addEventListener("change", onConfigChange);
 sessionMinutesInput.addEventListener("change", onConfigChange);
 roundSecondsInput.addEventListener("change", onConfigChange);
+fieldShapeInput.addEventListener("change", onConfigChange);
 verticalPolarityInput.addEventListener("change", onConfigChange);
 
 window.addEventListener("keydown", onKeyDown);
@@ -353,7 +360,7 @@ function resetSession() {
   state.sessionEndTs = 0;
   state.nowTs = performance.now();
   state.lastResponseTs = state.nowTs;
-  state.dots = buildDotField(INITIAL_DOT_COUNT, 220, state.roundSeed, state.visualTuning);
+  state.dots = buildDotField(INITIAL_DOT_COUNT, getFieldExtent(), state.roundSeed, state.visualTuning);
   setRoundDebugState("idle", "-", "-", 0);
 
   stopRoundTicker();
@@ -415,8 +422,8 @@ function startRound() {
   state.roundStartTs = now;
   state.roundEndTs = state.roundStartTs + state.roundDurationMs;
 
-  const fieldRadius = getFieldRadius();
-  state.dots = buildDotField(ROUND_DOT_COUNT, fieldRadius, state.roundSeed, state.visualTuning);
+  const fieldExtent = getFieldExtent();
+  state.dots = buildDotField(ROUND_DOT_COUNT, fieldExtent, state.roundSeed, state.visualTuning);
   setRoundDebugState("pending", "-", state.targetSide, 0);
 
   startRoundTicker();
@@ -644,6 +651,7 @@ function initializeConfigInputs() {
   roundSecondsInput.max = String(MAX_ROUND_SECONDS);
   roundSecondsInput.step = "1";
   roundSecondsInput.value = String(DEFAULT_ROUND_SECONDS);
+  fieldShapeInput.value = DEFAULT_FIELD_SHAPE_VALUE;
   verticalPolarityInput.value = DEFAULT_VERTICAL_POLARITY;
 
   if (debugStatusEl) {
@@ -670,6 +678,7 @@ function readConfigInputs() {
   const monitorWidthRaw = Number.parseFloat(monitorWidthInput.value);
   const viewDistanceRaw = Number.parseFloat(viewDistanceInput.value);
   const vergenceMode = normalizeVergenceMode(vergenceModeInput.value);
+  const fieldShape = normalizeFieldShape(fieldShapeInput.value);
   const verticalPolarity = normalizeVerticalPolarity(verticalPolarityInput.value);
   const visualPreset = normalizeVisualPreset(visualPresetInput.value);
   const startPdRaw = Number.parseInt(startPdInput.value, 10);
@@ -688,6 +697,7 @@ function readConfigInputs() {
     monitorWidthIn,
     viewDistanceIn,
     vergenceMode,
+    fieldShape,
     verticalPolarity,
     visualPreset,
     startPd,
@@ -709,6 +719,9 @@ function hydratePersistedConfigIntoInputs() {
   }
   if (typeof persisted.vergenceMode === "string") {
     vergenceModeInput.value = persisted.vergenceMode;
+  }
+  if (typeof persisted.fieldShape === "string") {
+    fieldShapeInput.value = persisted.fieldShape;
   }
   if (typeof persisted.verticalPolarity === "string") {
     verticalPolarityInput.value = persisted.verticalPolarity;
@@ -757,6 +770,7 @@ function persistConfig(config) {
     monitorWidthConfirmed: state.monitorWidthConfirmed,
     viewDistanceIn: config.viewDistanceIn,
     vergenceMode: config.vergenceMode,
+    fieldShape: config.fieldShape,
     verticalPolarity: config.verticalPolarity,
     visualPreset: config.visualPreset,
     startPd: config.startPd,
@@ -776,6 +790,7 @@ function applyConfigInputs(config) {
   monitorWidthInput.value = formatInches(config.monitorWidthIn);
   viewDistanceInput.value = formatInches(config.viewDistanceIn);
   vergenceModeInput.value = normalizeVergenceMode(config.vergenceMode);
+  fieldShapeInput.value = normalizeFieldShape(config.fieldShape);
   verticalPolarityInput.value = normalizeVerticalPolarity(config.verticalPolarity);
   visualPresetInput.value = normalizeVisualPreset(config.visualPreset);
   startPdInput.value = String(config.startPd);
@@ -858,6 +873,7 @@ function setInputsDisabled(disabled) {
   goalPdInput.disabled = disabled;
   sessionMinutesInput.disabled = disabled;
   roundSecondsInput.disabled = disabled;
+  fieldShapeInput.disabled = disabled;
   verticalPolarityInput.disabled = disabled;
   lrSplitInput.disabled = false;
 }
@@ -880,6 +896,7 @@ function refreshIdlePreview() {
 function applyConfigToState(config) {
   state.goalPd = config.goalPd;
   state.vergenceMode = config.vergenceMode;
+  state.fieldShape = config.fieldShape;
   state.verticalPolarity = config.verticalPolarity;
   state.visualPreset = config.visualPreset;
   state.visualTuning = getVisualPresetTuning(config.visualPreset);
@@ -891,7 +908,7 @@ function applyConfigToState(config) {
   state.sessionDurationMs = config.sessionMinutes * 60_000;
   state.roundDurationMs = config.roundSeconds * 1000;
   state.roundVergence = resolveRoundVergence(config.vergenceMode, 1, state.modeSequenceSeed);
-  state.dots = buildDotField(INITIAL_DOT_COUNT, 220, state.roundSeed || 1001, state.visualTuning);
+  state.dots = buildDotField(INITIAL_DOT_COUNT, getFieldExtent(), state.roundSeed || 1001, state.visualTuning);
 }
 
 function createEmptyExerciseMetrics() {
@@ -1128,6 +1145,11 @@ function formatInches(value) {
 function normalizeVergenceMode(value) {
   if (VERGENCE_MODE_MAP.has(value)) return value;
   return DEFAULT_VERGENCE_MODE;
+}
+
+function normalizeFieldShape(value) {
+  if (FIELD_SHAPE_VALUES.includes(value)) return value;
+  return DEFAULT_FIELD_SHAPE_VALUE;
 }
 
 function normalizeVerticalPolarity(value) {
@@ -1374,7 +1396,7 @@ function renderScene() {
   const cx = w * 0.5;
   const cy = h * 0.5;
   const trainingActive = isTrainingActive();
-  const fieldRadius = getFieldRadius();
+  const fieldGeometry = getFieldGeometry();
   const roundVergence = getDisplayRoundVergence();
   const vergenceVector = getVergenceVector(roundVergence);
 
@@ -1396,29 +1418,38 @@ function renderScene() {
     y: squareDisparity * 0.5 * vergenceVector.y
   };
 
-  drawStereoFieldGlow(ctx, leftEyeCenter, rightEyeCenter, fieldRadius);
+  drawStereoFieldGlow(ctx, leftEyeCenter, rightEyeCenter, fieldGeometry);
   drawRandomDotStereoSquare(
     ctx,
     state.dots,
     leftEyeCenter,
     rightEyeCenter,
-    fieldRadius,
+    fieldGeometry,
     squareShift,
     trainingActive ? state.targetSide : "up",
     trainingActive
   );
 }
 
-function drawStereoFieldGlow(context, leftEyeCenter, rightEyeCenter, radius) {
+function drawStereoFieldGlow(context, leftEyeCenter, rightEyeCenter, fieldGeometry) {
+  const extent = fieldGeometry.extent * 1.02;
   context.fillStyle = "rgba(255, 64, 64, 0.09)";
-  context.beginPath();
-  context.arc(leftEyeCenter.x, leftEyeCenter.y, radius * 1.02, 0, Math.PI * 2);
-  context.fill();
+  if (fieldGeometry.shape === "square") {
+    context.fillRect(leftEyeCenter.x - extent, leftEyeCenter.y - extent, extent * 2, extent * 2);
+  } else {
+    context.beginPath();
+    context.arc(leftEyeCenter.x, leftEyeCenter.y, extent, 0, Math.PI * 2);
+    context.fill();
+  }
 
   context.fillStyle = "rgba(60, 184, 255, 0.09)";
-  context.beginPath();
-  context.arc(rightEyeCenter.x, rightEyeCenter.y, radius * 1.02, 0, Math.PI * 2);
-  context.fill();
+  if (fieldGeometry.shape === "square") {
+    context.fillRect(rightEyeCenter.x - extent, rightEyeCenter.y - extent, extent * 2, extent * 2);
+  } else {
+    context.beginPath();
+    context.arc(rightEyeCenter.x, rightEyeCenter.y, extent, 0, Math.PI * 2);
+    context.fill();
+  }
 }
 
 function drawRandomDotStereoSquare(
@@ -1426,26 +1457,27 @@ function drawRandomDotStereoSquare(
   dots,
   leftEyeCenter,
   rightEyeCenter,
-  fieldRadius,
+  fieldGeometry,
   squareShift,
   side,
   showSquare = true
 ) {
-  const squareOffset = fieldRadius * TARGET_OFFSET_RATIO;
-  const squareHalf = fieldRadius * TARGET_HALF_SIZE_RATIO;
+  const fieldExtent = fieldGeometry.extent;
+  const squareOffset = fieldExtent * TARGET_OFFSET_RATIO;
+  const squareHalf = fieldExtent * TARGET_HALF_SIZE_RATIO;
   const targetPopSizePx = Math.max(0, Math.round(state.visualTuning?.targetPopSizePx ?? TARGET_POP_SIZE_PX));
   const targetPopAlphaScale = Math.max(1, state.visualTuning?.targetPopAlphaScale ?? TARGET_POP_ALPHA_SCALE);
   const center = getSideCenter(side, squareOffset);
   const rawShiftPerEyeX = showSquare ? squareShift.x : 0;
   const rawShiftPerEyeY = showSquare ? squareShift.y : 0;
-  const maxHorizontalShift = Math.max(0, fieldRadius - (Math.abs(center.x) + squareHalf + TARGET_EDGE_PADDING_PX));
-  const maxVerticalShift = Math.max(0, fieldRadius - (Math.abs(center.y) + squareHalf + TARGET_EDGE_PADDING_PX));
+  const maxHorizontalShift = Math.max(0, fieldExtent - (Math.abs(center.x) + squareHalf + TARGET_EDGE_PADDING_PX));
+  const maxVerticalShift = Math.max(0, fieldExtent - (Math.abs(center.y) + squareHalf + TARGET_EDGE_PADDING_PX));
   const shiftPerEyeX = Math.sign(rawShiftPerEyeX) * Math.min(Math.abs(rawShiftPerEyeX), maxHorizontalShift);
   const shiftPerEyeY = Math.sign(rawShiftPerEyeY) * Math.min(Math.abs(rawShiftPerEyeY), maxVerticalShift);
 
   for (let i = 0; i < dots.length; i += 1) {
     const dot = dots[i];
-    const insideField = dot.x * dot.x + dot.y * dot.y <= fieldRadius * fieldRadius;
+    const insideField = isInsideField(dot.x, dot.y, fieldGeometry);
     if (!insideField) continue;
 
     const insideSquare =
@@ -1495,8 +1527,23 @@ function wrapInsideSquare(localX, squareHalf) {
   return normalized - squareHalf;
 }
 
-function getFieldRadius() {
+function getFieldShape() {
+  return normalizeFieldShape(state.fieldShape);
+}
+
+function getFieldExtent() {
   return Math.min(canvas.width, canvas.height) * 0.34;
+}
+
+function getFieldGeometry() {
+  return { shape: getFieldShape(), extent: getFieldExtent() };
+}
+
+function isInsideField(x, y, fieldGeometry) {
+  if (fieldGeometry.shape === "square") {
+    return Math.abs(x) <= fieldGeometry.extent && Math.abs(y) <= fieldGeometry.extent;
+  }
+  return x * x + y * y <= fieldGeometry.extent * fieldGeometry.extent;
 }
 
 function drawBackdrop(context, width, height) {
