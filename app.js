@@ -479,7 +479,7 @@ function handleRoundTimeout() {
 }
 
 function onKeyDown(event) {
-  if (event.repeat) return;
+  if (event.repeat && !shouldAllowRepeatedDebugHotkey(event)) return;
   if (handlePauseToggleHotkey(event)) return;
   if (handleDebugDifficultyHotkeys(event)) return;
   if (!state.running) return;
@@ -531,6 +531,12 @@ function onKeyDown(event) {
   startRound();
 }
 
+function shouldAllowRepeatedDebugHotkey(event) {
+  if (!DEBUG_MODE) return false;
+  if (isEditableTarget(event.target)) return false;
+  return getDebugDifficultyDirection(event) !== 0;
+}
+
 function handlePauseToggleHotkey(event) {
   if (event.code !== "KeyP") return false;
   if (isEditableTarget(event.target)) return false;
@@ -559,10 +565,13 @@ function handleDebugDifficultyHotkeys(event) {
 }
 
 function getDebugDifficultyDirection(event) {
+  const key = typeof event.key === "string" ? event.key : "";
   if (event.code === "NumpadAdd") return 1;
   if (event.code === "NumpadSubtract") return -1;
-  if (event.code === "Equal") return 1;
-  if (event.code === "Minus") return -1;
+  if (event.code === "BracketRight" || key === "]") return 1;
+  if (event.code === "BracketLeft" || key === "[") return -1;
+  if (event.code === "Equal" || key === "+" || key === "=") return 1;
+  if (event.code === "Minus" || key === "-") return -1;
   return 0;
 }
 
