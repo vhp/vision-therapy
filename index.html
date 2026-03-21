@@ -120,7 +120,12 @@
               step="1"
               value="20"
             />
-            <label for="lrSplit" class="readonly-label">L/R Split (px)</label>
+            <label for="verticalPolarity">Vertical Mode Mapping</label>
+            <select id="verticalPolarity">
+              <option value="standard">Standard (Up = red up)</option>
+              <option value="flipped">Flipped (Up = blue up)</option>
+            </select>
+            <label for="lrSplit" class="readonly-label">Eye Split (px)</label>
             <input id="lrSplit" type="text" value="0 px" readonly />
           </div>
           <ul class="advanced-help-list">
@@ -130,7 +135,8 @@
             </li>
             <li class="debug-only"><strong>Start PD:</strong> debug-only value used as the initial PD estimate.</li>
             <li><strong>Round Seconds:</strong> controls the round timer (default 20s). Timeout beeps and scores -1.</li>
-            <li><strong>L/R Split:</strong> read-only rendering split shown for reference.</li>
+            <li><strong>Vertical Mode Mapping:</strong> flips `Vergence Up` / `Vergence Down` polarity if clinical testing suggests the opposite convention.</li>
+            <li><strong>Eye Split:</strong> read-only rendering split shown for reference, with `H` or `V` axis tags.</li>
           </ul>
         </details>
         <p id="status" class="status" aria-live="polite">Press Start to begin.</p>
@@ -141,7 +147,7 @@
             <strong id="pauseExerciseName">Vergence Trainer</strong>
             <span class="pause-key">Vergence</span>
             <strong id="pauseVergenceMode">Convergence</strong>
-            <span class="pause-key">L/R Split</span>
+            <span class="pause-key">Eye Split</span>
             <strong id="pauseLrSplit">0 px</strong>
           </div>
         </div>

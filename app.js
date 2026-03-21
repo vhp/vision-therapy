@@ -55,7 +55,10 @@ const {
 const FALLBACK_VERGENCE_MODES = Object.freeze([
   { value: "convergence", label: "Convergence" },
   { value: "divergence", label: "Divergence" },
-  { value: "alternate", label: "Jump Vergence (Alternating)" }
+  { value: "alternate", label: "Jump Vergence (Alternating)" },
+  { value: "random_jump", label: "Jump Vergence (Random)" },
+  { value: "vergence_up", label: "Vergence Up" },
+  { value: "vergence_down", label: "Vergence Down" }
 ]);
 
 const VERGENCE_MODES = Object.freeze(
@@ -110,6 +113,8 @@ const DEFAULT_VISUAL_PRESET_VALUE = VISUAL_PRESET_MAP.has(DEFAULT_VISUAL_PRESET)
   ? DEFAULT_VISUAL_PRESET
   : VISUAL_PRESETS[0].value;
 const DEFAULT_VISUAL_TUNING = getVisualPresetTuning(DEFAULT_VISUAL_PRESET_VALUE);
+const DEFAULT_VERTICAL_POLARITY = "standard";
+const VERTICAL_POLARITY_VALUES = Object.freeze(["standard", "flipped"]);
 
 const SIDE_KEYS = {
   ArrowUp: "up",
@@ -150,6 +155,7 @@ const startPdInput = document.getElementById("startPd");
 const goalPdInput = document.getElementById("goalPd");
 const sessionMinutesInput = document.getElementById("sessionMinutes");
 const roundSecondsInput = document.getElementById("roundSeconds");
+const verticalPolarityInput = document.getElementById("verticalPolarity");
 const lrSplitInput = document.getElementById("lrSplit");
 
 const summaryCardEl = document.getElementById("summaryCard");
@@ -180,6 +186,7 @@ if (
   !goalPdInput ||
   !sessionMinutesInput ||
   !roundSecondsInput ||
+  !verticalPolarityInput ||
   !lrSplitInput
 ) {
   throw new Error("Training config input(s) missing.");
@@ -215,6 +222,7 @@ const state = {
   bestPd: 0,
   goalPd: DEFAULT_GOAL_PD,
   vergenceMode: DEFAULT_VERGENCE_MODE,
+  verticalPolarity: DEFAULT_VERTICAL_POLARITY,
   visualPreset: DEFAULT_VISUAL_PRESET_VALUE,
   visualTuning: DEFAULT_VISUAL_TUNING,
   roundVergence: DEFAULT_VERGENCE_MODE,
@@ -230,6 +238,7 @@ const state = {
   roundDurationMs: DEFAULT_ROUND_SECONDS * 1000,
   round: 0,
   targetSide: "up",
+  modeSequenceSeed: 0,
   roundSeed: 0,
   roundStartTs: 0,
   roundEndTs: 0,
@@ -274,6 +283,7 @@ startPdInput.addEventListener("change", onConfigChange);
 goalPdInput.addEventListener("change", onConfigChange);
 sessionMinutesInput.addEventListener("change", onConfigChange);
 roundSecondsInput.addEventListener("change", onConfigChange);
+verticalPolarityInput.addEventListener("change", onConfigChange);
 
 window.addEventListener("keydown", onKeyDown);
 if (debugDownBtn) {
@@ -303,7 +313,8 @@ function startSession() {
   resetScoringState();
   applyConfigToState(config);
   state.round = 0;
-  state.roundVergence = resolveRoundVergence(config.vergenceMode, 1);
+  state.modeSequenceSeed = ((Math.random() * 0xffffffff) | 0) >>> 0;
+  state.roundVergence = resolveRoundVergence(config.vergenceMode, 1, state.modeSequenceSeed);
 
   state.sessionStartTs = performance.now();
   state.sessionEndTs = state.sessionStartTs + state.sessionDurationMs;
@@ -332,7 +343,8 @@ function resetSession() {
   resetScoringState();
   applyConfigToState(config);
   state.round = 0;
-  state.roundVergence = resolveRoundVergence(config.vergenceMode, 1);
+  state.modeSequenceSeed = 0;
+  state.roundVergence = resolveRoundVergence(config.vergenceMode, 1, state.modeSequenceSeed);
   state.targetSide = "up";
   state.roundSeed = 1001;
   state.roundStartTs = 0;
@@ -397,7 +409,7 @@ function startRound() {
   }
 
   state.round += 1;
-  state.roundVergence = resolveRoundVergence(state.vergenceMode, state.round);
+  state.roundVergence = resolveRoundVergence(state.vergenceMode, state.round, state.modeSequenceSeed);
   state.targetSide = SIDES[(Math.random() * SIDES.length) | 0];
   state.roundSeed = ((Math.random() * 0xffffffff) | 0) >>> 0;
   state.roundStartTs = now;
@@ -632,6 +644,7 @@ function initializeConfigInputs() {
   roundSecondsInput.max = String(MAX_ROUND_SECONDS);
   roundSecondsInput.step = "1";
   roundSecondsInput.value = String(DEFAULT_ROUND_SECONDS);
+  verticalPolarityInput.value = DEFAULT_VERTICAL_POLARITY;
 
   if (debugStatusEl) {
     debugStatusEl.hidden = !DEBUG_MODE;
@@ -657,6 +670,7 @@ function readConfigInputs() {
   const monitorWidthRaw = Number.parseFloat(monitorWidthInput.value);
   const viewDistanceRaw = Number.parseFloat(viewDistanceInput.value);
   const vergenceMode = normalizeVergenceMode(vergenceModeInput.value);
+  const verticalPolarity = normalizeVerticalPolarity(verticalPolarityInput.value);
   const visualPreset = normalizeVisualPreset(visualPresetInput.value);
   const startPdRaw = Number.parseInt(startPdInput.value, 10);
   const goalPdRaw = Number.parseInt(goalPdInput.value, 10);
@@ -670,7 +684,17 @@ function readConfigInputs() {
   const sessionMinutes = clampInt(sessionMinutesRaw, 1, ABSOLUTE_SESSION_MINUTES_MAX, DEFAULT_SESSION_MINUTES);
   const roundSeconds = clampInt(roundSecondsRaw, MIN_ROUND_SECONDS, MAX_ROUND_SECONDS, DEFAULT_ROUND_SECONDS);
 
-  return { monitorWidthIn, viewDistanceIn, vergenceMode, visualPreset, startPd, goalPd, sessionMinutes, roundSeconds };
+  return {
+    monitorWidthIn,
+    viewDistanceIn,
+    vergenceMode,
+    verticalPolarity,
+    visualPreset,
+    startPd,
+    goalPd,
+    sessionMinutes,
+    roundSeconds
+  };
 }
 
 function hydratePersistedConfigIntoInputs() {
@@ -685,6 +709,9 @@ function hydratePersistedConfigIntoInputs() {
   }
   if (typeof persisted.vergenceMode === "string") {
     vergenceModeInput.value = persisted.vergenceMode;
+  }
+  if (typeof persisted.verticalPolarity === "string") {
+    verticalPolarityInput.value = persisted.verticalPolarity;
   }
   if (typeof persisted.visualPreset === "string") {
     visualPresetInput.value = persisted.visualPreset;
@@ -730,6 +757,7 @@ function persistConfig(config) {
     monitorWidthConfirmed: state.monitorWidthConfirmed,
     viewDistanceIn: config.viewDistanceIn,
     vergenceMode: config.vergenceMode,
+    verticalPolarity: config.verticalPolarity,
     visualPreset: config.visualPreset,
     startPd: config.startPd,
     goalPd: config.goalPd,
@@ -748,6 +776,7 @@ function applyConfigInputs(config) {
   monitorWidthInput.value = formatInches(config.monitorWidthIn);
   viewDistanceInput.value = formatInches(config.viewDistanceIn);
   vergenceModeInput.value = normalizeVergenceMode(config.vergenceMode);
+  verticalPolarityInput.value = normalizeVerticalPolarity(config.verticalPolarity);
   visualPresetInput.value = normalizeVisualPreset(config.visualPreset);
   startPdInput.value = String(config.startPd);
   goalPdInput.value = String(config.goalPd);
@@ -795,12 +824,19 @@ function getCurrentTotalSplitPx() {
   return getBackgroundDisparity(state.difficultySteps) + getSquareDisparity(state.difficultySteps);
 }
 
-function formatSplitPx(splitPx) {
-  return `${splitPx.toFixed(0)} px`;
+function getDisplayRoundVergence() {
+  return state.running || state.paused
+    ? state.roundVergence
+    : resolveRoundVergence(state.vergenceMode, 1, state.modeSequenceSeed);
+}
+
+function formatSplitPx(splitPx, roundVergence = getDisplayRoundVergence()) {
+  const axisCode = getVergenceAxis(roundVergence) === "vertical" ? "V" : "H";
+  return `${splitPx.toFixed(0)} px ${axisCode}`;
 }
 
 function updateSplitReadouts() {
-  const splitText = formatSplitPx(getCurrentTotalSplitPx());
+  const splitText = formatSplitPx(getCurrentTotalSplitPx(), getDisplayRoundVergence());
   lrSplitInput.value = splitText;
   pauseLrSplitEl.textContent = splitText;
 }
@@ -822,6 +858,7 @@ function setInputsDisabled(disabled) {
   goalPdInput.disabled = disabled;
   sessionMinutesInput.disabled = disabled;
   roundSecondsInput.disabled = disabled;
+  verticalPolarityInput.disabled = disabled;
   lrSplitInput.disabled = false;
 }
 
@@ -843,6 +880,7 @@ function refreshIdlePreview() {
 function applyConfigToState(config) {
   state.goalPd = config.goalPd;
   state.vergenceMode = config.vergenceMode;
+  state.verticalPolarity = config.verticalPolarity;
   state.visualPreset = config.visualPreset;
   state.visualTuning = getVisualPresetTuning(config.visualPreset);
   state.monitorWidthIn = config.monitorWidthIn;
@@ -852,7 +890,7 @@ function applyConfigToState(config) {
   state.bestPd = state.currentPd;
   state.sessionDurationMs = config.sessionMinutes * 60_000;
   state.roundDurationMs = config.roundSeconds * 1000;
-  state.roundVergence = resolveRoundVergence(config.vergenceMode, 1);
+  state.roundVergence = resolveRoundVergence(config.vergenceMode, 1, state.modeSequenceSeed);
   state.dots = buildDotField(INITIAL_DOT_COUNT, 220, state.roundSeed || 1001, state.visualTuning);
 }
 
@@ -916,6 +954,10 @@ function getExerciseScore(exerciseKey) {
 }
 
 function getExpectedExerciseKeysForMode(mode, sampleRounds = 24) {
+  const normalizedMode = normalizeVergenceMode(mode);
+  if (normalizedMode === "alternate" || normalizedMode === "random_jump") {
+    return ["convergence", "divergence"];
+  }
   const keys = new Set();
   for (let round = 1; round <= sampleRounds; round += 1) {
     const resolved = normalizeExerciseKey(resolveRoundVergence(mode, round));
@@ -959,6 +1001,8 @@ function formatExerciseShortCode(exerciseKey) {
   const key = normalizeExerciseKey(exerciseKey);
   if (key === "convergence") return "C";
   if (key === "divergence") return "D";
+  if (key === "vergence_up") return "VU";
+  if (key === "vergence_down") return "VD";
   if (key === "unassigned") return "U";
   const label = formatExerciseLabel(key);
   return label.slice(0, 3).toUpperCase();
@@ -1086,20 +1130,52 @@ function normalizeVergenceMode(value) {
   return DEFAULT_VERGENCE_MODE;
 }
 
+function normalizeVerticalPolarity(value) {
+  if (VERTICAL_POLARITY_VALUES.includes(value)) return value;
+  return DEFAULT_VERTICAL_POLARITY;
+}
+
 function normalizeVisualPreset(value) {
   if (VISUAL_PRESET_MAP.has(value)) return value;
   return DEFAULT_VISUAL_PRESET_VALUE;
 }
 
+function getVergenceModeGroupLabel(modeValue) {
+  if (modeValue === "convergence" || modeValue === "divergence") {
+    return "Horizontal Basics";
+  }
+  if (modeValue === "alternate" || modeValue === "random_jump") {
+    return "Horizontal Jump";
+  }
+  if (modeValue === "vergence_up" || modeValue === "vergence_down") {
+    return "Vertical / Doctor Directed";
+  }
+  return "";
+}
+
 function populateVergenceModeInput() {
   const current = normalizeVergenceMode(vergenceModeInput.value);
   vergenceModeInput.replaceChildren();
+  const groups = new Map();
 
   for (const mode of VERGENCE_MODES) {
     const option = document.createElement("option");
     option.value = mode.value;
     option.textContent = mode.label;
-    vergenceModeInput.append(option);
+    const groupLabel = getVergenceModeGroupLabel(mode.value);
+    if (!groupLabel) {
+      vergenceModeInput.append(option);
+      continue;
+    }
+
+    let group = groups.get(groupLabel);
+    if (!group) {
+      group = document.createElement("optgroup");
+      group.label = groupLabel;
+      groups.set(groupLabel, group);
+      vergenceModeInput.append(group);
+    }
+    group.append(option);
   }
 
   vergenceModeInput.value = current;
@@ -1182,16 +1258,49 @@ function normalizeVisualPresetConfig(preset) {
   });
 }
 
-function resolveRoundVergence(vergenceMode, round) {
+function resolveRoundVergence(vergenceMode, round, sequenceSeed = 0) {
   const normalized = normalizeVergenceMode(vergenceMode);
   if (normalized === "alternate") {
     return round % 2 === 0 ? "divergence" : "convergence";
   }
+  if (normalized === "random_jump") {
+    return resolveRandomJumpVergence(round, sequenceSeed);
+  }
+  if (normalized === "vergence_up" || normalized === "vergence_down") {
+    return normalized;
+  }
   return normalized === "divergence" ? "divergence" : "convergence";
 }
 
-function getVergenceSign(roundVergence) {
-  return roundVergence === "divergence" ? -1 : 1;
+function resolveRandomJumpVergence(round, sequenceSeed = 0) {
+  const safeRound = Math.max(1, Math.trunc(round) || 1);
+  const mixedSeed = (Math.imul(safeRound, 0x9e3779b1) ^ (sequenceSeed >>> 0)) >>> 0;
+  return createRng(mixedSeed)() < 0.5 ? "convergence" : "divergence";
+}
+
+function getVergenceAxis(roundVergence) {
+  const normalized = normalizeExerciseKey(roundVergence);
+  return normalized === "vergence_up" || normalized === "vergence_down" ? "vertical" : "horizontal";
+}
+
+function getVerticalPolaritySign() {
+  return normalizeVerticalPolarity(state.verticalPolarity) === "flipped" ? -1 : 1;
+}
+
+function getVergenceVector(roundVergence) {
+  const normalized = normalizeExerciseKey(roundVergence);
+  if (normalized === "divergence") {
+    return { x: -1, y: 0 };
+  }
+  // Vertical modes use symmetric vertical disparity. The polarity is user-selectable so
+  // clinical testing can choose whether "up" means red/left up or the opposite.
+  if (normalized === "vergence_up") {
+    return { x: 0, y: getVerticalPolaritySign() };
+  }
+  if (normalized === "vergence_down") {
+    return { x: 0, y: -getVerticalPolaritySign() };
+  }
+  return { x: 1, y: 0 };
 }
 
 function formatVergenceLabel(mode) {
@@ -1266,53 +1375,59 @@ function renderScene() {
   const cy = h * 0.5;
   const trainingActive = isTrainingActive();
   const fieldRadius = getFieldRadius();
-  const roundVergence = trainingActive ? state.roundVergence : resolveRoundVergence(state.vergenceMode, 1);
-  const vergenceSign = getVergenceSign(roundVergence);
+  const roundVergence = getDisplayRoundVergence();
+  const vergenceVector = getVergenceVector(roundVergence);
 
   ctx.clearRect(0, 0, w, h);
   drawBackdrop(ctx, w, h);
 
   const backgroundDisparity = getBackgroundDisparity(state.difficultySteps);
   const squareDisparity = getSquareDisparity(state.difficultySteps);
-  const leftCx = cx - backgroundDisparity * 0.5 * vergenceSign;
-  const rightCx = cx + backgroundDisparity * 0.5 * vergenceSign;
+  const leftEyeCenter = {
+    x: cx - backgroundDisparity * 0.5 * vergenceVector.x,
+    y: cy - backgroundDisparity * 0.5 * vergenceVector.y
+  };
+  const rightEyeCenter = {
+    x: cx + backgroundDisparity * 0.5 * vergenceVector.x,
+    y: cy + backgroundDisparity * 0.5 * vergenceVector.y
+  };
+  const squareShift = {
+    x: squareDisparity * 0.5 * vergenceVector.x,
+    y: squareDisparity * 0.5 * vergenceVector.y
+  };
 
-  drawStereoFieldGlow(ctx, leftCx, rightCx, cy, fieldRadius);
+  drawStereoFieldGlow(ctx, leftEyeCenter, rightEyeCenter, fieldRadius);
   drawRandomDotStereoSquare(
     ctx,
     state.dots,
-    leftCx,
-    rightCx,
-    cy,
+    leftEyeCenter,
+    rightEyeCenter,
     fieldRadius,
-    squareDisparity,
-    vergenceSign,
+    squareShift,
     trainingActive ? state.targetSide : "up",
     trainingActive
   );
 }
 
-function drawStereoFieldGlow(context, leftCx, rightCx, cy, radius) {
+function drawStereoFieldGlow(context, leftEyeCenter, rightEyeCenter, radius) {
   context.fillStyle = "rgba(255, 64, 64, 0.09)";
   context.beginPath();
-  context.arc(leftCx, cy, radius * 1.02, 0, Math.PI * 2);
+  context.arc(leftEyeCenter.x, leftEyeCenter.y, radius * 1.02, 0, Math.PI * 2);
   context.fill();
 
   context.fillStyle = "rgba(60, 184, 255, 0.09)";
   context.beginPath();
-  context.arc(rightCx, cy, radius * 1.02, 0, Math.PI * 2);
+  context.arc(rightEyeCenter.x, rightEyeCenter.y, radius * 1.02, 0, Math.PI * 2);
   context.fill();
 }
 
 function drawRandomDotStereoSquare(
   context,
   dots,
-  leftCx,
-  rightCx,
-  cy,
+  leftEyeCenter,
+  rightEyeCenter,
   fieldRadius,
-  squareDisparity,
-  vergenceSign,
+  squareShift,
   side,
   showSquare = true
 ) {
@@ -1321,9 +1436,12 @@ function drawRandomDotStereoSquare(
   const targetPopSizePx = Math.max(0, Math.round(state.visualTuning?.targetPopSizePx ?? TARGET_POP_SIZE_PX));
   const targetPopAlphaScale = Math.max(1, state.visualTuning?.targetPopAlphaScale ?? TARGET_POP_ALPHA_SCALE);
   const center = getSideCenter(side, squareOffset);
-  const rawShiftPerEye = showSquare ? squareDisparity * 0.5 * vergenceSign : 0;
+  const rawShiftPerEyeX = showSquare ? squareShift.x : 0;
+  const rawShiftPerEyeY = showSquare ? squareShift.y : 0;
   const maxHorizontalShift = Math.max(0, fieldRadius - (Math.abs(center.x) + squareHalf + TARGET_EDGE_PADDING_PX));
-  const shiftPerEye = Math.sign(rawShiftPerEye) * Math.min(Math.abs(rawShiftPerEye), maxHorizontalShift);
+  const maxVerticalShift = Math.max(0, fieldRadius - (Math.abs(center.y) + squareHalf + TARGET_EDGE_PADDING_PX));
+  const shiftPerEyeX = Math.sign(rawShiftPerEyeX) * Math.min(Math.abs(rawShiftPerEyeX), maxHorizontalShift);
+  const shiftPerEyeY = Math.sign(rawShiftPerEyeY) * Math.min(Math.abs(rawShiftPerEyeY), maxVerticalShift);
 
   for (let i = 0; i < dots.length; i += 1) {
     const dot = dots[i];
@@ -1335,23 +1453,29 @@ function drawRandomDotStereoSquare(
       Math.abs(dot.x - center.x) <= squareHalf &&
       Math.abs(dot.y - center.y) <= squareHalf;
 
-    const y = cy + dot.y;
-    let lx = leftCx + dot.x;
-    let rx = rightCx + dot.x;
+    let lx = leftEyeCenter.x + dot.x;
+    let ly = leftEyeCenter.y + dot.y;
+    let rx = rightEyeCenter.x + dot.x;
+    let ry = rightEyeCenter.y + dot.y;
     if (insideSquare) {
       const localX = dot.x - center.x;
-      const leftLocalX = wrapInsideSquare(localX - shiftPerEye, squareHalf);
-      const rightLocalX = wrapInsideSquare(localX + shiftPerEye, squareHalf);
-      lx = leftCx + center.x + leftLocalX;
-      rx = rightCx + center.x + rightLocalX;
+      const localY = dot.y - center.y;
+      const leftLocalX = shiftPerEyeX === 0 ? localX : wrapInsideSquare(localX - shiftPerEyeX, squareHalf);
+      const rightLocalX = shiftPerEyeX === 0 ? localX : wrapInsideSquare(localX + shiftPerEyeX, squareHalf);
+      const leftLocalY = shiftPerEyeY === 0 ? localY : wrapInsideSquare(localY - shiftPerEyeY, squareHalf);
+      const rightLocalY = shiftPerEyeY === 0 ? localY : wrapInsideSquare(localY + shiftPerEyeY, squareHalf);
+      lx = leftEyeCenter.x + center.x + leftLocalX;
+      ly = leftEyeCenter.y + center.y + leftLocalY;
+      rx = rightEyeCenter.x + center.x + rightLocalX;
+      ry = rightEyeCenter.y + center.y + rightLocalY;
     }
     const size = insideSquare ? dot.r + targetPopSizePx : dot.r;
     context.globalAlpha = insideSquare ? targetPopAlphaScale : 1;
 
     context.fillStyle = LEFT_DOT_COLOR;
-    context.fillRect(lx, y, size, size);
+    context.fillRect(lx, ly, size, size);
     context.fillStyle = RIGHT_DOT_COLOR;
-    context.fillRect(rx, y, size, size);
+    context.fillRect(rx, ry, size, size);
   }
 
   context.globalAlpha = 1;
@@ -1537,18 +1661,18 @@ function syncPauseCard() {
 
   pauseExerciseNameEl.textContent = EXERCISE_LABEL;
   pauseVergenceModeEl.textContent = formatPauseVergenceLabel();
-  pauseLrSplitEl.textContent = formatSplitPx(getCurrentTotalSplitPx());
+  pauseLrSplitEl.textContent = formatSplitPx(getCurrentTotalSplitPx(), getDisplayRoundVergence());
   pauseCardEl.hidden = false;
 }
 
 function formatPauseVergenceLabel() {
   const configured = normalizeVergenceMode(state.vergenceMode);
   const configuredLabel = formatVergenceLabel(configured);
-  if (configured !== "alternate") {
+  if (configured !== "alternate" && configured !== "random_jump") {
     return configuredLabel;
   }
 
-  const currentRoundLabel = formatVergenceLabel(resolveRoundVergence(configured, state.round || 1));
+  const currentRoundLabel = formatVergenceLabel(resolveRoundVergence(configured, state.round || 1, state.modeSequenceSeed));
   return `${configuredLabel} (current round: ${currentRoundLabel})`;
 }
 

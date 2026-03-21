@@ -37,7 +37,10 @@ window.APP_CONFIG = Object.freeze({
   VERGENCE_MODES: [
     { value: "convergence", label: "Convergence" },
     { value: "divergence", label: "Divergence" },
-    { value: "alternate", label: "Jump Vergence (Alternating)" }
+    { value: "alternate", label: "Jump Vergence (Alternating)" },
+    { value: "random_jump", label: "Jump Vergence (Random)" },
+    { value: "vergence_up", label: "Vergence Up" },
+    { value: "vergence_down", label: "Vergence Down" }
   ],
 
   VISUAL_PRESETS: [

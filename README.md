@@ -23,19 +23,21 @@ Browser-based vergence training prototype using red/cyan anaglyph random-dot ste
 ## Session Setup
 
 - `Core Settings`: `Vergence Mode`, `Visual Preset`, `Session Target PD`, `Session Minutes`.
-- `Advanced Settings`: `Monitor Width`, `View Distance`, `Round Seconds`, a read-only `L/R Split` (marked `RO`), and debug-only `Start PD`.
+- `Advanced Settings`: `Monitor Width`, `View Distance`, `Round Seconds`, `Vertical Mode Mapping`, a read-only `Eye Split` (marked `RO`), and debug-only `Start PD`.
 - `Monitor Width` is a hard requirement before first start.
 - Once set, monitor width is cached in browser `localStorage` and reused.
+- `Vertical Mode Mapping` lets you flip the `Vergence Up` / `Vergence Down` polarity if clinical testing suggests the opposite convention.
 
 ## Pause UX
 
 When paused (for example after `Esc`):
-- A pause box is shown with `Exercise`, `Vergence`, and `L/R Split`.
+- A pause box is shown with `Exercise`, `Vergence`, and `Eye Split`.
 - Status text is simplified to: `Press Resume or P to continue.`
 
 ## Modes and Presets
 
-- Vergence modes: `Convergence`, `Divergence`, `Jump Vergence (Alternating)`.
+- Vergence modes: `Convergence`, `Divergence`, `Jump Vergence (Alternating)`, `Jump Vergence (Random)`, `Vergence Up`, `Vergence Down`.
+- Mode labels in this project are generic clinical/task labels rather than references to any outside product naming.
 - Visual presets (from `config.js`):
   - `Balanced (Default)`
   - `More Obvious`
@@ -59,5 +61,5 @@ When paused (for example after `Esc`):
 ## Notes
 
 - PD displayed here is an estimate based on monitor width, viewing distance, and pixel disparity.
-- `L/R split` is a rendering metric shown as read-only in `Advanced Settings` and in the pause box.
+- `Eye split` is a rendering metric shown as read-only in `Advanced Settings` and in the pause box; it now includes an `H` or `V` axis tag.
 - This project is a prototype, not a medical device.
