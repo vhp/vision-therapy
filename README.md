@@ -6,7 +6,23 @@ Browser-based vergence training prototype using red/cyan anaglyph random-dot ste
 ## Quick Start
 
 - Open `index.html` directly (`file://...`) or host as a static site.
-- Files used at runtime: `index.html`, `styles.css`, `config.js`, `app.js`.
+- Files used at runtime: `index.html`, `styles.css`, `config.js`, `vergence-core.js`, `app.js`.
+
+## Testing
+
+- `node --test`
+  - Runs the no-dependency core regression tests in `tests/vergence-core.test.js`.
+- `python3 -m http.server 4173`
+  - Serves the repo locally so the browser smoke harness can load the app over `http://localhost` instead of `file://`.
+  - Open `http://localhost:4173/tests/browser-smoke.html` and click `Run Smoke Test`.
+- `tests/browser-smoke.html`
+  - Opens a browser smoke harness that loads the real app and verifies all vergence modes, both field shapes, vertical polarity persistence, debug hotkeys, arrow-key response, and pause/resume behavior.
+  - The harness runs with short test values (`Round Seconds = 5`, `Session Minutes = 1`) so the real timers stay visible but the suite finishes quickly.
+  - Use a local static server for the smoke harness; direct `file://` loading can block iframe access in some browsers.
+- `make verify`
+  - Runs the syntax checks and the `node:test` suite together.
+- `make serve`
+  - Starts the local static server on `http://localhost:4173/` and prints the smoke harness URL.
 
 ## Core Behavior
 
@@ -59,10 +75,12 @@ When paused (for example after `Esc`):
 
 - Main user-facing knobs live in `config.js`.
 - Low-level rendering defaults live in `app.js` to keep `config.js` smaller.
+- Shared pure math/input helpers live in `vergence-core.js`.
 - You can still override those low-level defaults by adding matching keys to `window.APP_CONFIG` in `config.js`.
 
 ## Notes
 
 - PD displayed here is an estimate based on monitor width, viewing distance, and pixel disparity.
+- The canvas backing store now tracks the rendered canvas size so the displayed vergence demand is not distorted by CSS scaling.
 - `Eye split` is a rendering metric shown as read-only in `Advanced Settings` and in the pause box; it now includes an `H` or `V` axis tag.
 - This project is a prototype, not a medical device.

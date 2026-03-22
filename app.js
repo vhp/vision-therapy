@@ -7,6 +7,30 @@
 if (!window.APP_CONFIG) {
   throw new Error("APP_CONFIG missing. Load config.js before app.js.");
 }
+if (!window.VergenceCore) {
+  throw new Error("VergenceCore missing. Load vergence-core.js before app.js.");
+}
+
+const {
+  clampInt: coreClampInt,
+  clampFloat: coreClampFloat,
+  sanitizePresetFloat: coreSanitizePresetFloat,
+  sanitizePresetInt: coreSanitizePresetInt,
+  createRng: coreCreateRng,
+  getDebugDifficultyDirection: coreGetDebugDifficultyDirection,
+  resolveRoundVergence: coreResolveRoundVergence,
+  getVergenceAxis: coreGetVergenceAxis,
+  getVerticalPolaritySign: coreGetVerticalPolaritySign,
+  getVergenceVector: coreGetVergenceVector,
+  getTotalSplitPx: coreGetTotalSplitPx,
+  getMmPerPixel: coreGetMmPerPixel,
+  splitPxToPd: coreSplitPxToPd,
+  pdToSplitPx: corePdToSplitPx,
+  difficultyToPd: coreDifficultyToPd,
+  pdToDifficultySteps: corePdToDifficultySteps,
+  getCanvasMetrics: coreGetCanvasMetrics,
+  getFieldExtent: coreGetFieldExtent
+} = window.VergenceCore;
 
 const {
   DEFAULT_ROUND_SECONDS,
@@ -177,6 +201,8 @@ const sumSkipsEl = document.getElementById("sumSkips");
 
 const canvas = document.getElementById("viewer");
 const ctx = canvas.getContext("2d");
+const DEFAULT_CANVAS_WIDTH = getPositiveInteger(canvas?.getAttribute("width"), 680);
+const DEFAULT_CANVAS_HEIGHT = getPositiveInteger(canvas?.getAttribute("height"), DEFAULT_CANVAS_WIDTH);
 
 if (!ctx) {
   throw new Error("Canvas context not available.");
@@ -263,6 +289,7 @@ const state = {
 let tickIntervalId = null;
 let audioCtx = null;
 let wasFullscreenActive = isFullscreenActive();
+let viewportRefreshFrameId = null;
 
 startBtn.addEventListener("click", async () => {
   if (state.running) return;
@@ -293,6 +320,8 @@ fieldShapeInput.addEventListener("change", onConfigChange);
 verticalPolarityInput.addEventListener("change", onConfigChange);
 
 window.addEventListener("keydown", onKeyDown);
+window.addEventListener("resize", queueViewportRefresh);
+window.visualViewport?.addEventListener("resize", queueViewportRefresh);
 if (debugDownBtn) {
   debugDownBtn.addEventListener("click", () => applyDebugDifficultyAdjustment(-1, "button"));
 }
@@ -403,6 +432,25 @@ function onConfigChange(event) {
   updateHud();
   renderScene();
   hideSummaryCard();
+}
+
+function queueViewportRefresh() {
+  if (viewportRefreshFrameId !== null) return;
+  viewportRefreshFrameId = window.requestAnimationFrame(() => {
+    viewportRefreshFrameId = null;
+    refreshViewport();
+  });
+}
+
+function refreshViewport() {
+  state.nowTs = performance.now();
+  state.dots = buildDotField(getCurrentDotCount(), getFieldExtent(), state.roundSeed || 1001, state.visualTuning);
+  updateHud();
+  renderScene();
+}
+
+function getCurrentDotCount() {
+  return isTrainingActive() ? ROUND_DOT_COUNT : INITIAL_DOT_COUNT;
 }
 
 function startRound() {
@@ -565,14 +613,7 @@ function handleDebugDifficultyHotkeys(event) {
 }
 
 function getDebugDifficultyDirection(event) {
-  const key = typeof event.key === "string" ? event.key : "";
-  if (event.code === "NumpadAdd") return 1;
-  if (event.code === "NumpadSubtract") return -1;
-  if (event.code === "BracketRight" || key === "]") return 1;
-  if (event.code === "BracketLeft" || key === "[") return -1;
-  if (event.code === "Equal" || key === "+" || key === "=") return 1;
-  if (event.code === "Minus" || key === "-") return -1;
-  return 0;
+  return coreGetDebugDifficultyDirection(event);
 }
 
 function applyDebugDifficultyAdjustment(direction, source) {
@@ -583,8 +624,14 @@ function applyDebugDifficultyAdjustment(direction, source) {
   const pdDeltaText = `${pdDelta >= 0 ? "+" : ""}${pdDelta.toFixed(1)}Δ`;
   const directionText = direction > 0 ? "up" : "down";
   const eventPrefix = source === "button" ? "debugBtn" : "debugKey";
+  const activeTargetSide = state.running ? state.targetSide : "-";
 
-  setRoundDebugState(direction > 0 ? `${eventPrefix}+` : `${eventPrefix}-`, direction > 0 ? "+" : "-", "-", pdDelta);
+  setRoundDebugState(
+    direction > 0 ? `${eventPrefix}+` : `${eventPrefix}-`,
+    direction > 0 ? "+" : "-",
+    activeTargetSide,
+    pdDelta
+  );
   state.nowTs = performance.now();
   updateStatus(`Debug difficulty ${directionText}: 1 step (${pdDeltaText}).`);
   updateHud();
@@ -1073,6 +1120,7 @@ function pauseSessionForInactivity() {
   beep(720, 160);
   updateStatus("Auto-paused after 5 minutes without input. Press Resume to continue.", true);
   updateHud();
+  renderScene();
 }
 
 function pauseSessionByUser(message) {
@@ -1087,6 +1135,7 @@ function pauseSessionByUser(message) {
   syncSessionLayoutMode();
   updateStatus(message);
   updateHud();
+  renderScene();
 }
 
 function resumeSession() {
@@ -1127,24 +1176,25 @@ async function resumeSessionWithFullscreen() {
   resumeSession();
 }
 
+function getPositiveInteger(value, fallback) {
+  const parsed = Number.parseInt(value, 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
+
 function clampInt(value, min, max, fallback) {
-  if (Number.isNaN(value)) return fallback;
-  return Math.min(max, Math.max(min, value));
+  return coreClampInt(value, min, max, fallback);
 }
 
 function clampFloat(value, min, max, fallback) {
-  if (Number.isNaN(value)) return fallback;
-  return Math.min(max, Math.max(min, value));
+  return coreClampFloat(value, min, max, fallback);
 }
 
 function sanitizePresetFloat(value, min, max, fallback) {
-  if (!Number.isFinite(value)) return fallback;
-  return Math.min(max, Math.max(min, value));
+  return coreSanitizePresetFloat(value, min, max, fallback);
 }
 
 function sanitizePresetInt(value, min, max, fallback) {
-  if (!Number.isFinite(value)) return fallback;
-  return Math.min(max, Math.max(min, Math.trunc(value)));
+  return coreSanitizePresetInt(value, min, max, fallback);
 }
 
 function formatInches(value) {
@@ -1290,48 +1340,21 @@ function normalizeVisualPresetConfig(preset) {
 }
 
 function resolveRoundVergence(vergenceMode, round, sequenceSeed = 0) {
-  const normalized = normalizeVergenceMode(vergenceMode);
-  if (normalized === "alternate") {
-    return round % 2 === 0 ? "divergence" : "convergence";
-  }
-  if (normalized === "random_jump") {
-    return resolveRandomJumpVergence(round, sequenceSeed);
-  }
-  if (normalized === "vergence_up" || normalized === "vergence_down") {
-    return normalized;
-  }
-  return normalized === "divergence" ? "divergence" : "convergence";
-}
-
-function resolveRandomJumpVergence(round, sequenceSeed = 0) {
-  const safeRound = Math.max(1, Math.trunc(round) || 1);
-  const mixedSeed = (Math.imul(safeRound, 0x9e3779b1) ^ (sequenceSeed >>> 0)) >>> 0;
-  return createRng(mixedSeed)() < 0.5 ? "convergence" : "divergence";
+  return coreResolveRoundVergence(normalizeVergenceMode(vergenceMode), round, sequenceSeed);
 }
 
 function getVergenceAxis(roundVergence) {
-  const normalized = normalizeExerciseKey(roundVergence);
-  return normalized === "vergence_up" || normalized === "vergence_down" ? "vertical" : "horizontal";
+  return coreGetVergenceAxis(normalizeExerciseKey(roundVergence));
 }
 
 function getVerticalPolaritySign() {
-  return normalizeVerticalPolarity(state.verticalPolarity) === "flipped" ? -1 : 1;
+  return coreGetVerticalPolaritySign(normalizeVerticalPolarity(state.verticalPolarity));
 }
 
 function getVergenceVector(roundVergence) {
-  const normalized = normalizeExerciseKey(roundVergence);
-  if (normalized === "divergence") {
-    return { x: -1, y: 0 };
-  }
   // Vertical modes use symmetric vertical disparity. The polarity is user-selectable so
   // clinical testing can choose whether "up" means red/left up or the opposite.
-  if (normalized === "vergence_up") {
-    return { x: 0, y: getVerticalPolaritySign() };
-  }
-  if (normalized === "vergence_down") {
-    return { x: 0, y: -getVerticalPolaritySign() };
-  }
-  return { x: 1, y: 0 };
+  return coreGetVergenceVector(normalizeExerciseKey(roundVergence), normalizeVerticalPolarity(state.verticalPolarity));
 }
 
 function formatVergenceLabel(mode) {
@@ -1345,39 +1368,36 @@ function formatVisualPresetLabel(value) {
 }
 
 function difficultyToPd(difficultySteps, monitorWidthIn, viewDistanceIn) {
-  const totalSplitPx = getTotalSplitPx(difficultySteps);
-  const relativeSplitPx = Math.max(0, totalSplitPx - BASE_TOTAL_SPLIT_PX);
-  return splitPxToPd(relativeSplitPx, monitorWidthIn, viewDistanceIn);
+  return coreDifficultyToPd(
+    difficultySteps,
+    monitorWidthIn,
+    viewDistanceIn,
+    getScreenWidthPx(),
+    BASE_TOTAL_SPLIT_PX,
+    SPLIT_GAIN_PX_PER_STEP
+  );
 }
 
 function pdToDifficultySteps(targetPd, monitorWidthIn, viewDistanceIn) {
-  const relativeSplitPx = Math.max(0, pdToSplitPx(targetPd, monitorWidthIn, viewDistanceIn));
-  return relativeSplitPx / SPLIT_GAIN_PX_PER_STEP;
+  return corePdToDifficultySteps(
+    targetPd,
+    monitorWidthIn,
+    viewDistanceIn,
+    getScreenWidthPx(),
+    SPLIT_GAIN_PX_PER_STEP
+  );
 }
 
 function splitPxToPd(splitPx, monitorWidthIn, viewDistanceIn) {
-  const mmPerPx = getMmPerPixel(monitorWidthIn);
-  const distanceM = viewDistanceIn * 0.0254;
-  if (mmPerPx <= 0 || distanceM <= 0) return 0;
-
-  const displacementCm = (splitPx * mmPerPx) / 10;
-  return displacementCm / distanceM;
+  return coreSplitPxToPd(splitPx, monitorWidthIn, viewDistanceIn, getScreenWidthPx());
 }
 
 function pdToSplitPx(pd, monitorWidthIn, viewDistanceIn) {
-  const mmPerPx = getMmPerPixel(monitorWidthIn);
-  const distanceM = viewDistanceIn * 0.0254;
-  if (mmPerPx <= 0 || distanceM <= 0) return 0;
-
-  const displacementCm = pd * distanceM;
-  const displacementMm = displacementCm * 10;
-  return displacementMm / mmPerPx;
+  return corePdToSplitPx(pd, monitorWidthIn, viewDistanceIn, getScreenWidthPx());
 }
 
 function getMmPerPixel(monitorWidthIn) {
-  const screenWidthPx = getScreenWidthPx();
-  if (screenWidthPx <= 0) return 0;
-  return (monitorWidthIn * 25.4) / screenWidthPx;
+  return coreGetMmPerPixel(monitorWidthIn, getScreenWidthPx());
 }
 
 function getScreenWidthPx() {
@@ -1385,8 +1405,7 @@ function getScreenWidthPx() {
 }
 
 function getTotalSplitPx(difficultySteps) {
-  const safeSteps = Math.max(0, difficultySteps);
-  return BASE_TOTAL_SPLIT_PX + safeSteps * SPLIT_GAIN_PX_PER_STEP;
+  return coreGetTotalSplitPx(difficultySteps, BASE_TOTAL_SPLIT_PX, SPLIT_GAIN_PX_PER_STEP);
 }
 
 function getBackgroundDisparity(difficultySteps) {
@@ -1400,8 +1419,9 @@ function getSquareDisparity(difficultySteps) {
 }
 
 function renderScene() {
-  const w = canvas.width;
-  const h = canvas.height;
+  const viewport = syncCanvasViewport();
+  const w = viewport.cssWidth;
+  const h = viewport.cssHeight;
   const cx = w * 0.5;
   const cy = h * 0.5;
   const trainingActive = isTrainingActive();
@@ -1541,7 +1561,28 @@ function getFieldShape() {
 }
 
 function getFieldExtent() {
-  return Math.min(canvas.width, canvas.height) * 0.34;
+  const viewport = getCanvasMetrics();
+  return coreGetFieldExtent(viewport.cssWidth, viewport.cssHeight, 0.34);
+}
+
+function getCanvasMetrics() {
+  return coreGetCanvasMetrics(
+    canvas,
+    window.devicePixelRatio || 1,
+    DEFAULT_CANVAS_WIDTH,
+    DEFAULT_CANVAS_HEIGHT
+  );
+}
+
+function syncCanvasViewport() {
+  const metrics = getCanvasMetrics();
+  if (canvas.width !== metrics.backingWidth || canvas.height !== metrics.backingHeight) {
+    canvas.width = metrics.backingWidth;
+    canvas.height = metrics.backingHeight;
+  }
+  ctx.setTransform(metrics.dpr, 0, 0, metrics.dpr, 0, 0);
+  ctx.imageSmoothingEnabled = false;
+  return metrics;
 }
 
 function getFieldGeometry() {
@@ -1583,11 +1624,7 @@ function buildDotField(count, range, seed, visualTuning = FALLBACK_VISUAL_PRESET
 }
 
 function createRng(seed) {
-  let s = seed >>> 0;
-  return () => {
-    s = (s * 1664525 + 1013904223) >>> 0;
-    return s / 4294967296;
-  };
+  return coreCreateRng(seed);
 }
 
 function updateHud() {
@@ -1688,6 +1725,7 @@ function onFullscreenChange() {
   if (exitedFullscreenDuringRun) {
     pauseSessionByUser("Press Resume or P to continue.");
   }
+  queueViewportRefresh();
 }
 
 function syncSessionLayoutMode() {

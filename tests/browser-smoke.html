@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Vergence Trainer Browser Smoke Test</title>
+    <style>
+      :root {
+        --bg: #0a0a0a;
+        --panel: #141414;
+        --text: #f2f2f2;
+        --muted: #b8b8b8;
+        --pass: #59d7a8;
+        --fail: #ff7b7b;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        min-height: 100vh;
+        padding: 20px;
+        font-family: "Trebuchet MS", "Segoe UI", sans-serif;
+        background: #000;
+        color: var(--text);
+      }
+
+      .layout {
+        width: min(1200px, 100%);
+        margin: 0 auto;
+        display: grid;
+        gap: 16px;
+      }
+
+      .panel {
+        padding: 16px;
+        border: 1px solid #2f2f2f;
+        border-radius: 14px;
+        background: var(--panel);
+      }
+
+      button {
+        border: 0;
+        border-radius: 10px;
+        padding: 10px 14px;
+        font-weight: 700;
+        cursor: pointer;
+      }
+
+      #results {
+        margin: 0;
+        padding-left: 18px;
+      }
+
+      #results li {
+        margin-bottom: 6px;
+      }
+
+      .pass {
+        color: var(--pass);
+      }
+
+      .fail {
+        color: var(--fail);
+      }
+
+      iframe {
+        width: 100%;
+        min-height: 820px;
+        border: 1px solid #303030;
+        border-radius: 14px;
+        background: #050505;
+      }
+
+      code {
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      }
+    </style>
+  </head>
+  <body>
+    <main class="layout">
+      <section class="panel">
+        <h1>Browser Smoke Test</h1>
+        <p>
+          This page loads the real app in an iframe and runs a small interaction
+          smoke suite. If your browser blocks same-origin access for
+          <code>file://</code> iframes, serve the repo with any static server and
+          open this file through that server instead.
+        </p>
+        <p>
+          The smoke runner reloads the app into a clean state and performs setup
+          itself. Do not interact with the iframe while the test is running.
+        </p>
+        <button id="runBtn" type="button">Run Smoke Test</button>
+      </section>
+
+      <section class="panel">
+        <h2>Results</h2>
+        <ol id="results"></ol>
+      </section>
+
+      <iframe id="appFrame" title="Vergence Trainer Smoke Test Frame"></iframe>
+    </main>
+
+    <script src="browser-smoke.js"></script>
+  </body>
+</html>
