@@ -27,6 +27,8 @@ test("vergence scheduling behaves as expected", () => {
   const sequenceB = Array.from({ length: 8 }, (_, index) => core.resolveRoundVergence("random_jump", index + 1, 12345));
   assert.deepEqual(sequenceA, sequenceB);
   assert(sequenceA.every(mode => mode === "convergence" || mode === "divergence"));
+  assert(sequenceA.includes("convergence"));
+  assert(sequenceA.includes("divergence"));
 });
 
 test("vergence vectors respect axis and vertical polarity", () => {
@@ -83,4 +85,19 @@ test("canvas metrics follow rendered display size", () => {
     backingHeight: 1440
   });
   assert.equal(core.getFieldExtent(metrics.cssWidth, metrics.cssHeight, 0.34), 244.8);
+});
+
+test("display context normalization and comparison are stable", () => {
+  const previous = core.normalizeDisplayContext(1727.6, 1117.3, 2.0004);
+  const current = core.normalizeDisplayContext(1728, 1117, 2);
+  const changed = core.normalizeDisplayContext(1512, 982, 2);
+
+  assert.deepEqual(previous, {
+    screenWidth: 1728,
+    screenHeight: 1117,
+    devicePixelRatio: 2
+  });
+  assert.equal(core.isSameDisplayContext(previous, current), true);
+  assert.equal(core.isSameDisplayContext(previous, changed), false);
+  assert.equal(core.isSameDisplayContext(previous, null), false);
 });

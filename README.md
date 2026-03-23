@@ -16,9 +16,9 @@ Browser-based vergence training prototype using red/cyan anaglyph random-dot ste
   - Serves the repo locally so the browser smoke harness can load the app over `http://localhost` instead of `file://`.
   - Open `http://localhost:4173/tests/browser-smoke.html` and click `Run Smoke Test`.
 - `tests/browser-smoke.html`
-  - Opens a browser smoke harness that loads the real app and verifies all vergence modes, both field shapes, vertical polarity persistence, debug hotkeys, arrow-key response, and pause/resume behavior.
+  - Opens a browser smoke harness that loads the real app and verifies all vergence modes, both field shapes, vertical polarity persistence, debug hotkeys, arrow-key response, timeout transition locking, timeout-transition pause/resume behavior, reset during timeout transition, focus-loss auto-pause, and pause/resume behavior.
   - The harness runs with short test values (`Round Seconds = 5`, `Session Minutes = 1`) so the real timers stay visible but the suite finishes quickly.
-  - Use a local static server for the smoke harness; direct `file://` loading can block iframe access in some browsers.
+  - Use a local static server for the smoke harness; direct `file://` loading is intentionally blocked so the test always runs in a supported same-origin setup.
 - `make verify`
   - Runs the syntax checks and the `node:test` suite together.
 - `make serve`
@@ -31,6 +31,7 @@ Browser-based vergence training prototype using red/cyan anaglyph random-dot ste
 - `Space` = cannot see target (`-1`, new round).
 - `P` = pause/resume.
 - `Esc` exits fullscreen and pauses.
+- Leaving the tab/window auto-pauses the session so timing does not keep running in the background.
 - Scoring: correct = `+1`; wrong / timeout / space = `-1`.
 - Scores are tracked per exercise (for example separate convergence/divergence scores in alternating mode).
 - HUD score is exercise-scoped; alternating sessions show per-exercise score codes (for example `C:3 D:-1`).
@@ -41,7 +42,9 @@ Browser-based vergence training prototype using red/cyan anaglyph random-dot ste
 - `Core Settings`: `Vergence Mode`, `Visual Preset`, `Session Target PD`, `Session Minutes`.
 - `Advanced Settings`: `Monitor Width`, `View Distance`, `Round Seconds`, `Field Shape`, `Vertical Mode Mapping`, a read-only `Eye Split` (marked `RO`), and debug-only `Start PD`.
 - `Monitor Width` is a hard requirement before first start.
+- Use the `Confirm` / `Reconfirm` control next to `Monitor Width` to acknowledge the current value.
 - Once set, monitor width is cached in browser `localStorage` and reused.
+- If the app detects a display-context change (for example monitor resolution or device pixel ratio), monitor width must be reconfirmed before starting again.
 - `Field Shape` changes only the outer stereogram field between `Circle` and `Square`.
 - `Vertical Mode Mapping` lets you flip the `Vergence Up` / `Vergence Down` polarity if clinical testing suggests the opposite convention.
 

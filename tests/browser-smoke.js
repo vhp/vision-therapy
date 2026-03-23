@@ -1,7 +1,9 @@
 const runBtn = document.getElementById("runBtn");
 const resultsEl = document.getElementById("results");
 const appFrame = document.getElementById("appFrame");
+const environmentWarningEl = document.getElementById("environmentWarning");
 let runInProgress = false;
+const STATIC_SERVER_HELP = "Serve the repo from its root with `python3 -m http.server 4173`, then open `http://localhost:4173/tests/browser-smoke.html`.";
 const MODE_SCENARIOS = [
   {
     label: "Convergence / Square",
@@ -12,7 +14,20 @@ const MODE_SCENARIOS = [
     expectedNextExercises: ["Convergence"],
     expectedAxis: "H",
     verifyDebugHotkeys: true,
-    verifyPauseResume: true
+    verifyPauseResume: true,
+    verifyFocusLossPause: true,
+    verifyTimeoutGuard: true,
+    verifyTimeoutPauseResume: true
+  },
+  {
+    label: "Convergence / Reset During Timeout Transition",
+    vergenceMode: "convergence",
+    fieldShape: "square",
+    verticalPolarity: "standard",
+    expectedInitialExercises: ["Convergence"],
+    expectedNextExercises: ["Convergence"],
+    expectedAxis: "H",
+    verifyResetDuringTimeoutTransition: true
   },
   {
     label: "Divergence / Circle",
@@ -62,6 +77,13 @@ const MODE_SCENARIOS = [
 ];
 
 runBtn.addEventListener("click", () => {
+  const environmentIssue = getEnvironmentIssue();
+  if (environmentIssue) {
+    clearResults();
+    recordResult("fail", "Smoke suite blocked", environmentIssue);
+    syncEnvironmentGuard();
+    return;
+  }
   if (runInProgress) return;
   runSmokeSuite().catch(error => {
     recordResult("fail", "Smoke suite failed", error.message);
@@ -71,6 +93,8 @@ runBtn.addEventListener("click", () => {
     appFrame.style.pointerEvents = "";
   });
 });
+
+syncEnvironmentGuard();
 
 function clearResults() {
   resultsEl.replaceChildren();
@@ -87,6 +111,24 @@ function delay(ms) {
   return new Promise(resolve => {
     window.setTimeout(resolve, ms);
   });
+}
+
+function getEnvironmentIssue() {
+  if (window.location.protocol === "file:") {
+    return `This smoke harness must run over http:// or https://, not file://. ${STATIC_SERVER_HELP}`;
+  }
+  return "";
+}
+
+function syncEnvironmentGuard() {
+  const environmentIssue = getEnvironmentIssue();
+  if (environmentWarningEl) {
+    environmentWarningEl.hidden = !environmentIssue;
+    environmentWarningEl.textContent = environmentIssue;
+  }
+  if (!runInProgress) {
+    runBtn.disabled = Boolean(environmentIssue);
+  }
 }
 
 function dispatchFrameEvent(targetWindow, target, type) {
@@ -136,6 +178,20 @@ async function loadFrame() {
   }, 15000);
 }
 
+async function unloadFrame() {
+  appFrame.src = "about:blank";
+  await waitFor("app frame unload", () => {
+    try {
+      const doc = appFrame.contentWindow?.document;
+      if (!doc) return false;
+      const locationHref = String(doc.location?.href || "");
+      return locationHref === "about:blank";
+    } catch {
+      return false;
+    }
+  }, 5000);
+}
+
 function parseDebugStatus(text) {
   const result = Object.create(null);
   for (const part of text.split("|")) {
@@ -181,8 +237,12 @@ function installFullscreenStub(frameWindow) {
   }
 }
 
+function getStorageKey(frameWindow) {
+  return String(frameWindow.APP_CONFIG?.CONFIG_STORAGE_KEY || "vergence_trainer.config.v1");
+}
+
 function readStoredConfig(frameWindow) {
-  return JSON.parse(frameWindow.localStorage.getItem("vergence_trainer.config.v1") || "{}");
+  return JSON.parse(frameWindow.localStorage.getItem(getStorageKey(frameWindow)) || "{}");
 }
 
 function getTargetArrow(targetSide) {
@@ -224,9 +284,14 @@ async function bootFreshApp() {
 
 async function setMonitorWidth(frameWindow, frameDocument, widthIn) {
   const monitorWidthInput = frameDocument.getElementById("monitorWidth");
+  const confirmBtn = frameDocument.getElementById("monitorWidthConfirmBtn");
   monitorWidthInput.value = String(widthIn);
-  dispatchFrameEvent(frameWindow, monitorWidthInput, "input");
-  dispatchFrameEvent(frameWindow, monitorWidthInput, "change");
+  if (confirmBtn && !confirmBtn.hidden) {
+    confirmBtn.click();
+  } else {
+    dispatchFrameEvent(frameWindow, monitorWidthInput, "input");
+    dispatchFrameEvent(frameWindow, monitorWidthInput, "change");
+  }
   await waitFor("monitor width persistence", () => {
     const storedConfig = readStoredConfig(frameWindow);
     return storedConfig.monitorWidthIn === widthIn && storedConfig.monitorWidthConfirmed === true;
@@ -256,7 +321,7 @@ async function waitForReadyState(frameDocument) {
   const statusEl = frameDocument.getElementById("status");
   await waitFor("ready status", () => {
     const text = String(statusEl?.textContent || "");
-    return text.includes("Ready:") && !text.includes("Set Monitor Width");
+    return text.startsWith("Ready:");
   });
 }
 
@@ -308,6 +373,132 @@ async function verifyPauseResume(frameWindow, frameDocument, startBtn) {
   await waitFor("resume", () => startBtn.disabled === true && startBtn.textContent === "Running...");
 }
 
+async function stopScenarioSession(frameDocument) {
+  const resetBtn = frameDocument.getElementById("resetBtn");
+  const startBtn = frameDocument.getElementById("startBtn");
+  const roundEl = frameDocument.getElementById("round");
+  const pauseCard = frameDocument.getElementById("pauseCard");
+  resetBtn.click();
+  await waitFor("scenario reset", () => {
+    return startBtn.textContent === "Start" &&
+      startBtn.disabled === false &&
+      Number(roundEl.textContent) === 0 &&
+      pauseCard.hidden === true;
+  });
+}
+
+async function verifyFocusLossPause(frameWindow, frameDocument, startBtn) {
+  const EventCtor = frameWindow.Event || Event;
+  frameWindow.dispatchEvent(new EventCtor("blur"));
+  await waitFor("focus-loss pause", () => {
+    const pauseCard = frameDocument.getElementById("pauseCard");
+    const statusText = String(frameDocument.getElementById("status")?.textContent || "");
+    return !pauseCard.hidden && startBtn.textContent === "Resume" && statusText.includes("lost focus");
+  });
+
+  dispatchKey(frameWindow, "KeyP", "p");
+  await waitFor("focus-loss resume", () => startBtn.disabled === true && startBtn.textContent === "Running...");
+}
+
+async function verifyTimeoutGuard(frameWindow, frameDocument, debugStatusEl) {
+  const timedRound = Number(frameDocument.getElementById("round").textContent);
+  await waitFor("timeout transition", () => {
+    const debugState = parseDebugStatus(debugStatusEl.textContent);
+    return Number(debugState.round) === timedRound && debugState.event === "timeout";
+  }, 7000);
+
+  const timeoutState = parseDebugStatus(debugStatusEl.textContent);
+  const totalBefore = Number(timeoutState.total);
+  const arrow = getTargetArrow(timeoutState.target);
+  if (!arrow) {
+    throw new Error(`Timeout guard missing target side: ${timeoutState.target || "(missing)"}`);
+  }
+
+  dispatchKey(frameWindow, arrow.code, arrow.key);
+  await delay(120);
+
+  const currentRound = Number(frameDocument.getElementById("round").textContent);
+  const afterBlockedInput = parseDebugStatus(debugStatusEl.textContent);
+  if (currentRound !== timedRound) {
+    throw new Error(`Timeout guard failed: round advanced early from ${timedRound} to ${currentRound}`);
+  }
+  if (Number(afterBlockedInput.total) !== totalBefore) {
+    throw new Error(`Timeout guard failed: total changed from ${totalBefore} to ${afterBlockedInput.total}`);
+  }
+  if (afterBlockedInput.event !== "timeout") {
+    throw new Error(`Timeout guard failed: debug event changed to ${afterBlockedInput.event}`);
+  }
+
+  await waitFor("next round after timeout", () => Number(frameDocument.getElementById("round").textContent) > timedRound, 2000);
+}
+
+async function verifyPauseDuringTimeoutTransition(frameWindow, frameDocument, debugStatusEl, startBtn) {
+  const roundEl = frameDocument.getElementById("round");
+  const timedRound = Number(roundEl.textContent);
+
+  await waitFor("timeout transition for pause/resume", () => {
+    const debugState = parseDebugStatus(debugStatusEl.textContent);
+    return Number(debugState.round) === timedRound && debugState.event === "timeout";
+  }, 7000);
+
+  dispatchKey(frameWindow, "KeyP", "p");
+  await waitFor("pause during timeout transition", () => {
+    const pauseCard = frameDocument.getElementById("pauseCard");
+    return !pauseCard.hidden && startBtn.textContent === "Resume";
+  });
+
+  const pausedRound = Number(roundEl.textContent);
+  const pausedDebugState = parseDebugStatus(debugStatusEl.textContent);
+  if (pausedRound !== timedRound) {
+    throw new Error(`Timeout pause/resume failed: paused on round ${pausedRound} instead of expired round ${timedRound}`);
+  }
+  if (pausedDebugState.event !== "timeout") {
+    throw new Error(`Timeout pause/resume failed: expected timeout event while paused, got ${pausedDebugState.event}`);
+  }
+
+  dispatchKey(frameWindow, "KeyP", "p");
+  await waitFor("resume after timeout transition", () => startBtn.disabled === true && startBtn.textContent === "Running...");
+  await waitFor("next round after timeout-transition resume", () => Number(roundEl.textContent) > timedRound, 2000);
+
+  const resumedRound = Number(roundEl.textContent);
+  const resumedDebugState = parseDebugStatus(debugStatusEl.textContent);
+  if (resumedRound !== timedRound + 1) {
+    throw new Error(`Timeout pause/resume failed: resumed on round ${resumedRound}, expected ${timedRound + 1}`);
+  }
+  if (Number(resumedDebugState.round) !== resumedRound) {
+    throw new Error(`Timeout pause/resume failed: debug status round ${resumedDebugState.round} does not match visible round ${resumedRound}`);
+  }
+  if (resumedDebugState.event === "timeout") {
+    throw new Error("Timeout pause/resume failed: resumed into the expired timeout state");
+  }
+}
+
+async function verifyResetDuringTimeoutTransition(frameDocument, debugStatusEl) {
+  const roundEl = frameDocument.getElementById("round");
+  const resetBtn = frameDocument.getElementById("resetBtn");
+  const startBtn = frameDocument.getElementById("startBtn");
+  const timedRound = Number(roundEl.textContent);
+
+  await waitFor("timeout transition for reset", () => {
+    const debugState = parseDebugStatus(debugStatusEl.textContent);
+    return Number(debugState.round) === timedRound && debugState.event === "timeout";
+  }, 7000);
+
+  resetBtn.click();
+  await waitFor("reset during timeout transition", () => {
+    const pauseCard = frameDocument.getElementById("pauseCard");
+    return startBtn.textContent === "Start" &&
+      startBtn.disabled === false &&
+      Number(roundEl.textContent) === 0 &&
+      pauseCard.hidden === true;
+  });
+
+  await delay(600);
+  if (startBtn.textContent !== "Start" || Number(roundEl.textContent) !== 0) {
+    throw new Error("Reset during timeout transition failed: stale next-round callback changed state after reset");
+  }
+}
+
 async function runModeScenario(scenario) {
   const { frameWindow, frameDocument } = await bootFreshApp();
   recordResult("pass", `${scenario.label}: app loaded`);
@@ -341,6 +532,22 @@ async function runModeScenario(scenario) {
     recordResult("pass", `${scenario.label}: debug hotkeys verified`);
   }
 
+  if (scenario.verifyTimeoutGuard) {
+    await verifyTimeoutGuard(frameWindow, frameDocument, debugStatusEl);
+    recordResult("pass", `${scenario.label}: timeout transition lock verified`);
+  }
+
+  if (scenario.verifyTimeoutPauseResume) {
+    await verifyPauseDuringTimeoutTransition(frameWindow, frameDocument, debugStatusEl, startBtn);
+    recordResult("pass", `${scenario.label}: timeout-transition pause/resume verified`);
+  }
+
+  if (scenario.verifyResetDuringTimeoutTransition) {
+    await verifyResetDuringTimeoutTransition(frameDocument, debugStatusEl);
+    recordResult("pass", `${scenario.label}: reset during timeout transition verified`);
+    return;
+  }
+
   await answerCurrentRoundCorrectly(frameWindow, frameDocument, debugStatusEl);
   const nextDebugState = parseDebugStatus(debugStatusEl.textContent);
   assertOneOf(nextDebugState.exercise, scenario.expectedNextExercises, `${scenario.label} next exercise`);
@@ -353,6 +560,14 @@ async function runModeScenario(scenario) {
     await verifyPauseResume(frameWindow, frameDocument, startBtn);
     recordResult("pass", `${scenario.label}: pause/resume verified`);
   }
+
+  if (scenario.verifyFocusLossPause) {
+    await verifyFocusLossPause(frameWindow, frameDocument, startBtn);
+    recordResult("pass", `${scenario.label}: focus-loss auto-pause verified`);
+  }
+
+  await stopScenarioSession(frameDocument);
+  recordResult("pass", `${scenario.label}: scenario reset`);
 }
 
 async function runSmokeSuite() {
@@ -361,9 +576,25 @@ async function runSmokeSuite() {
   appFrame.style.pointerEvents = "none";
   clearResults();
   recordResult("pass", "Starting smoke suite");
-  for (const scenario of MODE_SCENARIOS) {
-    await runModeScenario(scenario);
-  }
+  let suiteError = null;
+  try {
+    for (const scenario of MODE_SCENARIOS) {
+      await runModeScenario(scenario);
+    }
 
-  recordResult("pass", "Smoke suite completed");
+    recordResult("pass", "Smoke suite completed");
+  } catch (error) {
+    suiteError = error;
+    throw error;
+  } finally {
+    try {
+      await unloadFrame();
+      recordResult("pass", "Smoke suite cleanup completed");
+    } catch (cleanupError) {
+      recordResult("fail", "Smoke suite cleanup failed", cleanupError.message);
+      if (!suiteError) {
+        throw cleanupError;
+      }
+    }
+  }
 }

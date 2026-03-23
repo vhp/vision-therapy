@@ -66,6 +66,15 @@
         color: var(--fail);
       }
 
+      .env-warning {
+        margin: 12px 0 0;
+        padding: 10px 12px;
+        border: 1px solid #6d3e3e;
+        border-radius: 10px;
+        background: #1b0f0f;
+        color: #ffd0d0;
+      }
+
       iframe {
         width: 100%;
         min-height: 820px;
@@ -93,6 +102,7 @@
           The smoke runner reloads the app into a clean state and performs setup
           itself. Do not interact with the iframe while the test is running.
         </p>
+        <p id="environmentWarning" class="env-warning" hidden></p>
         <button id="runBtn" type="button">Run Smoke Test</button>
       </section>
 

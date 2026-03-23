@@ -84,14 +84,17 @@
             >
               Monitor Width (in, set once)
             </label>
-            <input
-              id="monitorWidth"
-              type="number"
-              min="10"
-              max="60"
-              step="0.5"
-              value="24"
-            />
+            <div class="monitor-width-controls">
+              <input
+                id="monitorWidth"
+                type="number"
+                min="10"
+                max="60"
+                step="0.5"
+                value="24"
+              />
+              <button id="monitorWidthConfirmBtn" type="button" class="ghost" hidden>Confirm</button>
+            </div>
             <label for="viewDistance">View Distance (in)</label>
             <input
               id="viewDistance"
@@ -173,6 +176,7 @@
           </li>
           <li><kbd>Space</kbd> = cannot see target, score -1 and refresh</li>
           <li><kbd>P</kbd> = pause/resume session. Exiting fullscreen with <kbd>Esc</kbd> pauses automatically.</li>
+          <li>Switching tabs or windows auto-pauses the session so the timers do not keep running in the background.</li>
           <li>
             <strong>Core Settings (in order):</strong> Vergence Mode,
             Visual Preset, Session Target, and Session Minutes define the

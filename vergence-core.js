@@ -177,6 +177,40 @@
     return Math.min(width, height) * safeRatio;
   }
 
+  function normalizeDisplayContext(screenWidth, screenHeight, devicePixelRatio) {
+    const safeScreenWidth = Number.isFinite(screenWidth) && screenWidth > 0 ? Math.round(screenWidth) : 0;
+    const safeScreenHeight = Number.isFinite(screenHeight) && screenHeight > 0 ? Math.round(screenHeight) : 0;
+    const safeDevicePixelRatio = Number.isFinite(devicePixelRatio) && devicePixelRatio > 0
+      ? Math.round(devicePixelRatio * 1000) / 1000
+      : 1;
+
+    return {
+      screenWidth: safeScreenWidth,
+      screenHeight: safeScreenHeight,
+      devicePixelRatio: safeDevicePixelRatio
+    };
+  }
+
+  function isSameDisplayContext(previousContext, currentContext) {
+    if (!previousContext || typeof previousContext !== "object") return false;
+    if (!currentContext || typeof currentContext !== "object") return false;
+
+    const previous = normalizeDisplayContext(
+      previousContext.screenWidth,
+      previousContext.screenHeight,
+      previousContext.devicePixelRatio
+    );
+    const current = normalizeDisplayContext(
+      currentContext.screenWidth,
+      currentContext.screenHeight,
+      currentContext.devicePixelRatio
+    );
+
+    return previous.screenWidth === current.screenWidth &&
+      previous.screenHeight === current.screenHeight &&
+      previous.devicePixelRatio === current.devicePixelRatio;
+  }
+
   return Object.freeze({
     clampInt,
     clampFloat,
@@ -197,6 +231,8 @@
     pdToDifficultySteps,
     getCanvasViewportSize,
     getCanvasMetrics,
-    getFieldExtent
+    getFieldExtent,
+    normalizeDisplayContext,
+    isSameDisplayContext
   });
 });

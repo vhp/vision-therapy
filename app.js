@@ -29,7 +29,9 @@ const {
   difficultyToPd: coreDifficultyToPd,
   pdToDifficultySteps: corePdToDifficultySteps,
   getCanvasMetrics: coreGetCanvasMetrics,
-  getFieldExtent: coreGetFieldExtent
+  getFieldExtent: coreGetFieldExtent,
+  normalizeDisplayContext: coreNormalizeDisplayContext,
+  isSameDisplayContext: coreIsSameDisplayContext
 } = window.VergenceCore;
 
 const {
@@ -175,6 +177,7 @@ const resetBtn = document.getElementById("resetBtn");
 const advancedSetupEl = document.querySelector(".advanced-setup");
 
 const monitorWidthInput = document.getElementById("monitorWidth");
+const monitorWidthConfirmBtn = document.getElementById("monitorWidthConfirmBtn");
 const viewDistanceInput = document.getElementById("viewDistance");
 const vergenceModeInput = document.getElementById("vergenceMode");
 const visualPresetInput = document.getElementById("visualPreset");
@@ -209,6 +212,7 @@ if (!ctx) {
 }
 if (
   !monitorWidthInput ||
+  !monitorWidthConfirmBtn ||
   !viewDistanceInput ||
   !vergenceModeInput ||
   !visualPresetInput ||
@@ -248,6 +252,9 @@ if (
 const state = {
   running: false,
   paused: false,
+  awaitingNextRound: false,
+  resumeStartsNextRound: false,
+  monitorWidthNeedsReconfirm: false,
   score: 0,
   currentPd: 0,
   bestPd: 0,
@@ -287,6 +294,7 @@ const state = {
 };
 
 let tickIntervalId = null;
+let nextRoundTimeoutId = null;
 let audioCtx = null;
 let wasFullscreenActive = isFullscreenActive();
 let viewportRefreshFrameId = null;
@@ -294,7 +302,12 @@ let viewportRefreshFrameId = null;
 startBtn.addEventListener("click", async () => {
   if (state.running) return;
   if (!state.paused && !state.monitorWidthConfirmed) {
-    updateStatus("Set Monitor Width in Advanced Settings before starting. This is saved for future sessions.", true);
+    updateStatus(
+      state.monitorWidthNeedsReconfirm
+        ? "Reconfirm Monitor Width in Advanced Settings before starting because the display context changed."
+        : "Set and confirm Monitor Width in Advanced Settings before starting. This is saved for future sessions.",
+      true
+    );
     focusMonitorWidthInput();
     return;
   }
@@ -309,6 +322,7 @@ startBtn.addEventListener("click", async () => {
 resetBtn.addEventListener("click", resetSession);
 
 monitorWidthInput.addEventListener("change", onConfigChange);
+monitorWidthConfirmBtn.addEventListener("click", confirmMonitorWidth);
 viewDistanceInput.addEventListener("change", onConfigChange);
 vergenceModeInput.addEventListener("change", onConfigChange);
 visualPresetInput.addEventListener("change", onConfigChange);
@@ -328,11 +342,8 @@ if (debugDownBtn) {
 if (debugUpBtn) {
   debugUpBtn.addEventListener("click", () => applyDebugDifficultyAdjustment(1, "button"));
 }
-window.addEventListener("blur", () => {
-  if (state.running) {
-    updateStatus("Tab is inactive. Return to continue responding with arrows/space.");
-  }
-});
+window.addEventListener("blur", pauseSessionForFocusLoss);
+document.addEventListener("visibilitychange", onVisibilityChange);
 document.addEventListener("fullscreenchange", onFullscreenChange);
 document.addEventListener("webkitfullscreenchange", onFullscreenChange);
 
@@ -343,6 +354,8 @@ function startSession() {
   const config = readConfigInputs();
   applyConfigInputs(config);
   persistConfig(config);
+  clearPendingNextRound();
+  state.resumeStartsNextRound = false;
 
   state.running = true;
   state.paused = false;
@@ -373,6 +386,8 @@ function resetSession() {
   const config = readConfigInputs();
   applyConfigInputs(config);
   persistConfig(config);
+  clearPendingNextRound();
+  state.resumeStartsNextRound = false;
 
   state.running = false;
   state.paused = false;
@@ -401,7 +416,9 @@ function resetSession() {
 
   if (!state.monitorWidthConfirmed) {
     updateStatus(
-      "Reset complete. Set Monitor Width in Advanced Settings before starting. This is saved for future sessions.",
+      state.monitorWidthNeedsReconfirm
+        ? "Reset complete. Reconfirm Monitor Width in Advanced Settings before starting because the display context changed."
+        : "Reset complete. Set and confirm Monitor Width in Advanced Settings before starting. This is saved for future sessions.",
       true
     );
   } else {
@@ -418,6 +435,7 @@ function onConfigChange(event) {
   if (event?.target === monitorWidthInput) {
     const monitorWidthCandidate = Number.parseFloat(monitorWidthInput.value);
     state.monitorWidthConfirmed = Number.isFinite(monitorWidthCandidate);
+    state.monitorWidthNeedsReconfirm = false;
   }
 
   const config = readConfigInputs();
@@ -432,6 +450,19 @@ function onConfigChange(event) {
   updateHud();
   renderScene();
   hideSummaryCard();
+}
+
+function confirmMonitorWidth() {
+  if (state.running || state.paused) return;
+
+  const monitorWidthCandidate = Number.parseFloat(monitorWidthInput.value);
+  if (!Number.isFinite(monitorWidthCandidate)) {
+    updateStatus("Enter a valid Monitor Width before confirming it.", true);
+    focusMonitorWidthInput();
+    return;
+  }
+
+  onConfigChange({ target: monitorWidthInput });
 }
 
 function queueViewportRefresh() {
@@ -455,6 +486,8 @@ function getCurrentDotCount() {
 
 function startRound() {
   if (!state.running) return;
+  clearPendingNextRound();
+  state.resumeStartsNextRound = false;
 
   const now = performance.now();
   state.nowTs = now;
@@ -516,14 +549,14 @@ function handleRoundTimeout() {
   updateStatus(`Round timeout (${formatExerciseLabel(timeoutScore.exerciseKey)}). Score -1.`, true);
   updateHud();
 
-  setTimeout(() => {
+  scheduleNextRoundAfterDelay(() => {
     if (!state.running) return;
     if (performance.now() >= state.sessionEndTs) {
       endSession();
       return;
     }
     startRound();
-  }, NEXT_ROUND_DELAY_MS);
+  });
 }
 
 function onKeyDown(event) {
@@ -531,6 +564,12 @@ function onKeyDown(event) {
   if (handlePauseToggleHotkey(event)) return;
   if (handleDebugDifficultyHotkeys(event)) return;
   if (!state.running) return;
+  if (state.awaitingNextRound) {
+    if (event.code === "Space" || SIDE_KEYS[event.key]) {
+      event.preventDefault();
+    }
+    return;
+  }
 
   if (event.code === "Space") {
     event.preventDefault();
@@ -649,6 +688,8 @@ function isEditableTarget(target) {
 function endSession() {
   if (!state.running) return;
 
+  clearPendingNextRound();
+  state.resumeStartsNextRound = false;
   state.running = false;
   state.paused = false;
   stopRoundTicker();
@@ -722,7 +763,8 @@ function initializeConfigInputs() {
   }
 
   const persistedConfig = hydratePersistedConfigIntoInputs();
-  state.monitorWidthConfirmed = getPersistedMonitorWidthConfirmed(persistedConfig);
+  state.monitorWidthNeedsReconfirm = shouldRequireMonitorWidthReconfirm(persistedConfig);
+  state.monitorWidthConfirmed = !state.monitorWidthNeedsReconfirm && getPersistedMonitorWidthConfirmed(persistedConfig);
   const sanitizedConfig = readConfigInputs();
   applyConfigInputs(sanitizedConfig);
   persistConfig(sanitizedConfig);
@@ -824,6 +866,7 @@ function persistConfig(config) {
   const payload = {
     monitorWidthIn: config.monitorWidthIn,
     monitorWidthConfirmed: state.monitorWidthConfirmed,
+    displayContext: getCurrentDisplayContext(),
     viewDistanceIn: config.viewDistanceIn,
     vergenceMode: config.vergenceMode,
     fieldShape: config.fieldShape,
@@ -864,6 +907,36 @@ function getPersistedMonitorWidthConfirmed(persisted) {
   return Number.isFinite(persisted.monitorWidthIn);
 }
 
+function getCurrentDisplayContext() {
+  return coreNormalizeDisplayContext(
+    window.screen?.width || 0,
+    window.screen?.height || 0,
+    window.devicePixelRatio || 1
+  );
+}
+
+function getPersistedDisplayContext(persisted) {
+  if (!persisted || typeof persisted !== "object") return null;
+  const rawContext = persisted.displayContext;
+  if (!rawContext || typeof rawContext !== "object") return null;
+  return coreNormalizeDisplayContext(
+    rawContext.screenWidth,
+    rawContext.screenHeight,
+    rawContext.devicePixelRatio
+  );
+}
+
+function shouldRequireMonitorWidthReconfirm(persisted) {
+  if (!persisted || typeof persisted !== "object") return false;
+  if (!getPersistedMonitorWidthConfirmed(persisted)) return false;
+  if (!Number.isFinite(persisted.monitorWidthIn)) return false;
+
+  const savedDisplayContext = getPersistedDisplayContext(persisted);
+  if (!savedDisplayContext) return true;
+
+  return !coreIsSameDisplayContext(savedDisplayContext, getCurrentDisplayContext());
+}
+
 function syncMonitorWidthSetupUi() {
   const needsWidth = !state.monitorWidthConfirmed;
   if (advancedSetupEl instanceof HTMLDetailsElement) {
@@ -872,6 +945,8 @@ function syncMonitorWidthSetupUi() {
       advancedSetupEl.open = true;
     }
   }
+  monitorWidthConfirmBtn.hidden = state.running || state.paused || !needsWidth;
+  monitorWidthConfirmBtn.textContent = state.monitorWidthNeedsReconfirm ? "Reconfirm" : "Confirm";
 }
 
 function updateReadyStatus(config) {
@@ -881,8 +956,15 @@ function updateReadyStatus(config) {
     `mode ${formatVergenceLabel(config.vergenceMode)}, visual ${formatVisualPresetLabel(config.visualPreset)}.`;
 
   if (!state.monitorWidthConfirmed) {
+    if (state.monitorWidthNeedsReconfirm) {
+      updateStatus(
+        `Reconfirm Monitor Width in Advanced Settings because the display context changed. ${readyText}`,
+        true
+      );
+      return;
+    }
     updateStatus(
-      `Set Monitor Width once in Advanced Settings for accurate PD estimation. ${readyText}`,
+      `Set and confirm Monitor Width once in Advanced Settings for accurate PD estimation. ${readyText}`,
       true
     );
     return;
@@ -922,6 +1004,7 @@ function focusMonitorWidthInput() {
 
 function setInputsDisabled(disabled) {
   monitorWidthInput.disabled = disabled;
+  monitorWidthConfirmBtn.disabled = disabled;
   viewDistanceInput.disabled = disabled;
   vergenceModeInput.disabled = disabled;
   visualPresetInput.disabled = disabled;
@@ -1110,6 +1193,8 @@ function applyDifficultyDelta(deltaSteps) {
 function pauseSessionForInactivity() {
   if (!state.running) return;
 
+  state.resumeStartsNextRound = state.awaitingNextRound;
+  clearPendingNextRound();
   state.running = false;
   state.paused = true;
   state.nowTs = performance.now();
@@ -1126,6 +1211,8 @@ function pauseSessionForInactivity() {
 function pauseSessionByUser(message) {
   if (!state.running) return;
 
+  state.resumeStartsNextRound = state.awaitingNextRound;
+  clearPendingNextRound();
   state.running = false;
   state.paused = true;
   state.nowTs = performance.now();
@@ -1140,9 +1227,13 @@ function pauseSessionByUser(message) {
 
 function resumeSession() {
   if (!state.paused) return;
+  const resumeStartsNextRound = state.resumeStartsNextRound;
+  clearPendingNextRound();
+  state.resumeStartsNextRound = false;
 
   const now = performance.now();
-  const sessionRemainingMs = Math.max(0, state.sessionEndTs - state.nowTs);
+  const pausedAt = state.nowTs;
+  const sessionRemainingMs = Math.max(0, state.sessionEndTs - pausedAt);
   if (sessionRemainingMs <= 0) {
     state.running = true;
     state.paused = false;
@@ -1153,17 +1244,23 @@ function resumeSession() {
 
   state.running = true;
   state.paused = false;
-  const roundRemainingMs = Math.max(250, state.roundEndTs - state.nowTs);
-
   state.nowTs = now;
   state.sessionEndTs = now + sessionRemainingMs;
-  state.roundStartTs = now;
-  state.roundEndTs = now + roundRemainingMs;
   state.lastResponseTs = now;
 
   setInputsDisabled(true);
   setStartButtonLabel();
   syncSessionLayoutMode();
+
+  if (resumeStartsNextRound) {
+    updateStatus("Session resumed. Starting next round.");
+    startRound();
+    return;
+  }
+
+  const roundRemainingMs = Math.max(250, state.roundEndTs - pausedAt);
+  state.roundStartTs = now;
+  state.roundEndTs = now + roundRemainingMs;
   updateStatus("Session resumed.");
   startRoundTicker();
   updateHud();
@@ -1684,6 +1781,25 @@ function requestFullscreenOnStart() {
   }
 }
 
+function clearPendingNextRound() {
+  if (nextRoundTimeoutId !== null) {
+    clearTimeout(nextRoundTimeoutId);
+    nextRoundTimeoutId = null;
+  }
+  state.awaitingNextRound = false;
+}
+
+function scheduleNextRoundAfterDelay(callback, delayMs = NEXT_ROUND_DELAY_MS) {
+  clearPendingNextRound();
+  state.awaitingNextRound = true;
+  nextRoundTimeoutId = setTimeout(() => {
+    nextRoundTimeoutId = null;
+    if (!state.running || !state.awaitingNextRound) return;
+    state.awaitingNextRound = false;
+    callback();
+  }, delayMs);
+}
+
 function exitFullscreenIfActive() {
   if (!isFullscreenActive()) return Promise.resolve();
 
@@ -1726,6 +1842,17 @@ function onFullscreenChange() {
     pauseSessionByUser("Press Resume or P to continue.");
   }
   queueViewportRefresh();
+}
+
+function pauseSessionForFocusLoss() {
+  if (!state.running) return;
+  pauseSessionByUser("Session auto-paused after the app lost focus. Press Resume or P to continue.");
+  exitFullscreenIfActive();
+}
+
+function onVisibilityChange() {
+  if (document.visibilityState !== "hidden") return;
+  pauseSessionForFocusLoss();
 }
 
 function syncSessionLayoutMode() {
