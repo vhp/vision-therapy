@@ -56,6 +56,8 @@ const {
   INACTIVITY_PAUSE_MS,
   NEXT_ROUND_DELAY_MS,
   CONFIG_STORAGE_KEY,
+  HISTORY_STORAGE_KEY = "vergence_trainer.history.v1",
+  HISTORY_MAX_ENTRIES = 200,
   DEFAULT_MONITOR_WIDTH_IN,
   DEFAULT_VIEW_DISTANCE_IN,
   DEFAULT_START_PD,
@@ -218,6 +220,14 @@ const sumTimeoutsEl = document.getElementById("sumTimeouts");
 const sumSkipsEl = document.getElementById("sumSkips");
 const sumSuppressionsEl = document.getElementById("sumSuppressions");
 
+const historyCardEl = document.getElementById("historyCard");
+const historyEmptyEl = document.getElementById("historyEmpty");
+const historyTableEl = document.getElementById("historyTable");
+const historyTableBodyEl = document.getElementById("historyTableBody");
+const historyExportJsonBtn = document.getElementById("historyExportJsonBtn");
+const historyExportCsvBtn = document.getElementById("historyExportCsvBtn");
+const historyClearBtn = document.getElementById("historyClearBtn");
+
 const canvas = document.getElementById("viewer");
 const ctx = canvas.getContext("2d");
 const DEFAULT_CANVAS_WIDTH = getPositiveInteger(canvas?.getAttribute("width"), 680);
@@ -266,6 +276,17 @@ if (
   !sumSuppressionsEl
 ) {
   throw new Error("Summary element(s) missing.");
+}
+if (
+  !historyCardEl ||
+  !historyEmptyEl ||
+  !historyTableEl ||
+  !historyTableBodyEl ||
+  !historyExportJsonBtn ||
+  !historyExportCsvBtn ||
+  !historyClearBtn
+) {
+  throw new Error("History element(s) missing.");
 }
 
 const state = {
@@ -374,12 +395,16 @@ if (debugDownBtn) {
 if (debugUpBtn) {
   debugUpBtn.addEventListener("click", () => applyDebugDifficultyAdjustment(1, "button"));
 }
+historyExportJsonBtn.addEventListener("click", exportSessionHistoryJson);
+historyExportCsvBtn.addEventListener("click", exportSessionHistoryCsv);
+historyClearBtn.addEventListener("click", clearSessionHistoryWithConfirm);
 window.addEventListener("blur", pauseSessionForFocusLoss);
 document.addEventListener("visibilitychange", onVisibilityChange);
 document.addEventListener("fullscreenchange", onFullscreenChange);
 document.addEventListener("webkitfullscreenchange", onFullscreenChange);
 
 initializeConfigInputs();
+renderSessionHistory();
 refreshIdlePreview();
 
 function startSession() {
@@ -796,6 +821,8 @@ function endSession() {
 
   const reachedGoal = state.bestPd >= state.goalPd;
   showSummaryCard(reachedGoal);
+  appendSessionHistoryRecord(buildSessionHistoryRecord(reachedGoal));
+  renderSessionHistory();
 
   if (reachedGoal) {
     beep(1080, 130);
@@ -2096,6 +2123,168 @@ function showSummaryCard(reachedGoal) {
   sumSkipsEl.textContent = String(state.skipCount);
   sumSuppressionsEl.textContent = String(state.suppressionCount);
   summaryCardEl.classList.remove("hidden");
+}
+
+function buildSessionHistoryRecord(reachedGoal) {
+  const ranges = Object.keys(state.vergenceRanges)
+    .map(key => ({ exercise: key, pair: coreGetBestRangePair(state.vergenceRanges, key) }))
+    .filter(entry => entry.pair)
+    .map(entry => ({ exercise: entry.exercise, breakPd: entry.pair.breakPd, recoveryPd: entry.pair.recoveryPd }));
+
+  return {
+    endedAt: new Date().toISOString(),
+    mode: normalizeVergenceMode(state.vergenceMode),
+    visualPreset: state.visualPreset,
+    sessionMinutes: state.sessionDurationMs / 60_000,
+    goalPd: state.goalPd,
+    bestPd: state.bestPd,
+    reachedGoal,
+    totalScore: state.score,
+    rounds: state.round,
+    correct: state.correctCount,
+    wrong: state.wrongCount,
+    timeouts: state.timeoutCount,
+    skips: state.skipCount,
+    suppressions: state.suppressionCount,
+    ranges,
+    facility: isFacilityMode() ? { cycles: getFacilityCycles(), cpm: getFacilityCpm() } : null
+  };
+}
+
+function readSessionHistory() {
+  try {
+    const raw = window.localStorage?.getItem(HISTORY_STORAGE_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed.filter(entry => entry && typeof entry === "object") : [];
+  } catch {
+    return [];
+  }
+}
+
+function appendSessionHistoryRecord(record) {
+  try {
+    const history = readSessionHistory();
+    history.push(record);
+    const trimmed = history.slice(-Math.max(1, HISTORY_MAX_ENTRIES));
+    window.localStorage?.setItem(HISTORY_STORAGE_KEY, JSON.stringify(trimmed));
+  } catch {
+    // Ignore storage errors (privacy mode, quota, blocked storage).
+  }
+}
+
+function clearSessionHistoryWithConfirm() {
+  const history = readSessionHistory();
+  if (history.length === 0) return;
+  if (!window.confirm(`Delete all ${history.length} recorded sessions? This cannot be undone.`)) return;
+  try {
+    window.localStorage?.removeItem(HISTORY_STORAGE_KEY);
+  } catch {
+    // Ignore storage errors.
+  }
+  renderSessionHistory();
+}
+
+function getRecordBestRange(record) {
+  const ranges = Array.isArray(record.ranges) ? record.ranges : [];
+  return ranges.reduce(
+    (best, entry) => (Number.isFinite(entry?.breakPd) && (!best || entry.breakPd > best.breakPd) ? entry : best),
+    null
+  );
+}
+
+function formatHistoryDate(isoText) {
+  const date = new Date(isoText);
+  if (Number.isNaN(date.getTime())) return "-";
+  return date.toLocaleString(undefined, {
+    year: "2-digit", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit"
+  });
+}
+
+function renderSessionHistory() {
+  const history = readSessionHistory();
+  const recent = history.slice(-10).reverse();
+
+  historyEmptyEl.hidden = recent.length > 0;
+  historyTableEl.hidden = recent.length === 0;
+  historyExportJsonBtn.disabled = history.length === 0;
+  historyExportCsvBtn.disabled = history.length === 0;
+  historyClearBtn.disabled = history.length === 0;
+  historyTableBodyEl.replaceChildren();
+
+  for (const record of recent) {
+    const row = document.createElement("tr");
+    const bestRange = getRecordBestRange(record);
+    const cells = [
+      formatHistoryDate(record.endedAt),
+      formatVergenceLabel(record.mode),
+      Number.isFinite(record.bestPd) ? `${formatPd(record.bestPd)}Δ` : "-",
+      bestRange ? `${formatPd(bestRange.breakPd)}/${formatPd(bestRange.recoveryPd)}Δ` : "-",
+      String(record.totalScore ?? "-"),
+      String(record.rounds ?? "-"),
+      String(record.suppressions ?? 0)
+    ];
+    for (const text of cells) {
+      const cell = document.createElement("td");
+      cell.textContent = text;
+      row.append(cell);
+    }
+    historyTableBodyEl.append(row);
+  }
+}
+
+function downloadTextFile(filename, mimeType, content) {
+  const blob = new Blob([content], { type: mimeType });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  document.body.append(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+}
+
+function exportSessionHistoryJson() {
+  const history = readSessionHistory();
+  if (history.length === 0) return;
+  downloadTextFile("vergence-trainer-history.json", "application/json", JSON.stringify(history, null, 2));
+}
+
+function exportSessionHistoryCsv() {
+  const history = readSessionHistory();
+  if (history.length === 0) return;
+
+  const header = [
+    "endedAt", "mode", "visualPreset", "sessionMinutes", "goalPd", "bestPd", "reachedGoal",
+    "totalScore", "rounds", "correct", "wrong", "timeouts", "skips", "suppressions",
+    "bestBreakPd", "bestRecoveryPd", "facilityCycles", "facilityCpm"
+  ];
+  const lines = [header.join(",")];
+  for (const record of history) {
+    const bestRange = getRecordBestRange(record);
+    lines.push([
+      record.endedAt ?? "",
+      record.mode ?? "",
+      record.visualPreset ?? "",
+      record.sessionMinutes ?? "",
+      record.goalPd ?? "",
+      record.bestPd ?? "",
+      record.reachedGoal ?? "",
+      record.totalScore ?? "",
+      record.rounds ?? "",
+      record.correct ?? "",
+      record.wrong ?? "",
+      record.timeouts ?? "",
+      record.skips ?? "",
+      record.suppressions ?? "",
+      bestRange ? bestRange.breakPd : "",
+      bestRange ? bestRange.recoveryPd : "",
+      record.facility?.cycles ?? "",
+      record.facility?.cpm ?? ""
+    ].join(","));
+  }
+  downloadTextFile("vergence-trainer-history.csv", "text/csv", lines.join("\n"));
 }
 
 function updateStatus(text, danger = false) {

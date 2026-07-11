@@ -482,6 +482,47 @@ kbd {
   background: #000;
 }
 
+body.training-live .history-card,
+body.session-active .history-card {
+  display: none;
+}
+
+.history-actions {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.history-table-wrap {
+  overflow-x: auto;
+}
+
+.history-card table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.85rem;
+}
+
+.history-card th,
+.history-card td {
+  padding: 6px 10px;
+  text-align: left;
+  border-bottom: 1px solid #242424;
+  white-space: nowrap;
+}
+
+.history-card th {
+  color: var(--muted);
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+#historyEmpty {
+  margin: 0;
+  color: var(--muted);
+}
+
 @media (max-width: 920px) {
   .layout {
     grid-template-columns: 1fr;

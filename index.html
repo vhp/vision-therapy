@@ -228,6 +228,32 @@
       </div>
     </section>
 
+    <section id="historyCard" class="summary-card history-card">
+      <h2>Session History</h2>
+      <div class="history-actions">
+        <button id="historyExportJsonBtn" type="button" class="ghost">Export JSON</button>
+        <button id="historyExportCsvBtn" type="button" class="ghost">Export CSV</button>
+        <button id="historyClearBtn" type="button" class="ghost">Clear History</button>
+      </div>
+      <p id="historyEmpty">No sessions recorded yet. Finish a session to start the log.</p>
+      <div class="history-table-wrap">
+        <table id="historyTable" hidden>
+          <thead>
+            <tr>
+              <th>Date</th>
+              <th>Mode</th>
+              <th>Best PD</th>
+              <th>Break/Rec</th>
+              <th>Score</th>
+              <th>Rounds</th>
+              <th>Suppr.</th>
+            </tr>
+          </thead>
+          <tbody id="historyTableBody"></tbody>
+        </table>
+      </div>
+    </section>
+
     <script src="config.js"></script>
     <script src="vergence-core.js"></script>
     <script src="app.js"></script>

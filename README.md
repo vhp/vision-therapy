@@ -49,6 +49,10 @@ Browser-based vergence training prototype using red/cyan anaglyph random-dot ste
 - Scores are tracked per exercise (for example separate convergence/divergence scores in alternating mode).
 - HUD score is exercise-scoped; alternating sessions show per-exercise score codes (for example `C:3 D:-1`).
 - Session summary is shown at the end.
+- Every completed session is appended to a local history
+  (`localStorage`, last 200 sessions). The `Session History` panel below the
+  app lists recent sessions and offers JSON/CSV export for sharing with a
+  doctor, plus a `Clear History` control.
 
 ## Session Setup
 

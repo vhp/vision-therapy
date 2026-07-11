@@ -11,6 +11,8 @@ window.APP_CONFIG = Object.freeze({
   INACTIVITY_PAUSE_MS: 5 * 60_000,
   NEXT_ROUND_DELAY_MS: 380,
   CONFIG_STORAGE_KEY: "vergence_trainer.config.v1",
+  HISTORY_STORAGE_KEY: "vergence_trainer.history.v1",
+  HISTORY_MAX_ENTRIES: 200,
 
   DEFAULT_MONITOR_WIDTH_IN: 24,
   DEFAULT_VIEW_DISTANCE_IN: 16,
