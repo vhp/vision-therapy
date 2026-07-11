@@ -23,6 +23,10 @@ const {
   getVerticalPolaritySign: coreGetVerticalPolaritySign,
   getVergenceVector: coreGetVergenceVector,
   getTotalSplitPx: coreGetTotalSplitPx,
+  normalizeExerciseKey: coreNormalizeExerciseKey,
+  recordScoringEvent: coreRecordScoringEvent,
+  getExerciseScore: coreGetExerciseScore,
+  clampDifficultySteps: coreClampDifficultySteps,
   getMmPerPixel: coreGetMmPerPixel,
   splitPxToPd: coreSplitPxToPd,
   pdToSplitPx: corePdToSplitPx,
@@ -1097,10 +1101,6 @@ function applyConfigToState(config) {
   state.dots = buildDotField(INITIAL_DOT_COUNT, getFieldExtent(), state.roundSeed || 1001, state.visualTuning);
 }
 
-function createEmptyExerciseMetrics() {
-  return { score: 0, correct: 0, wrong: 0, skip: 0, timeout: 0 };
-}
-
 function resetScoringState() {
   state.score = 0;
   state.correctCount = 0;
@@ -1111,49 +1111,23 @@ function resetScoringState() {
 }
 
 function normalizeExerciseKey(value) {
-  if (typeof value !== "string") return "";
-  return value.trim().toLowerCase();
-}
-
-function ensureExerciseMetrics(exerciseKey) {
-  const normalized = normalizeExerciseKey(exerciseKey) || "unassigned";
-  if (!state.metricsByExercise[normalized]) {
-    state.metricsByExercise[normalized] = createEmptyExerciseMetrics();
-  }
-  return { key: normalized, metrics: state.metricsByExercise[normalized] };
+  return coreNormalizeExerciseKey(value);
 }
 
 function recordScoringEvent(outcomeType, exerciseKey) {
-  const { key, metrics } = ensureExerciseMetrics(exerciseKey);
+  const result = coreRecordScoringEvent(state.metricsByExercise, outcomeType, exerciseKey);
 
-  let scoreDelta = 0;
-  if (outcomeType === "correct") {
-    scoreDelta = 1;
-    state.correctCount += 1;
-    metrics.correct += 1;
-  } else if (outcomeType === "wrong") {
-    scoreDelta = -1;
-    state.wrongCount += 1;
-    metrics.wrong += 1;
-  } else if (outcomeType === "skip") {
-    scoreDelta = -1;
-    state.skipCount += 1;
-    metrics.skip += 1;
-  } else if (outcomeType === "timeout") {
-    scoreDelta = -1;
-    state.timeoutCount += 1;
-    metrics.timeout += 1;
-  }
+  if (outcomeType === "correct") state.correctCount += 1;
+  else if (outcomeType === "wrong") state.wrongCount += 1;
+  else if (outcomeType === "skip") state.skipCount += 1;
+  else if (outcomeType === "timeout") state.timeoutCount += 1;
 
-  state.score += scoreDelta;
-  metrics.score += scoreDelta;
-  return { exerciseKey: key, scoreDelta, exerciseScore: metrics.score, totalScore: state.score };
+  state.score += result.scoreDelta;
+  return { ...result, totalScore: state.score };
 }
 
 function getExerciseScore(exerciseKey) {
-  const normalized = normalizeExerciseKey(exerciseKey);
-  if (!normalized) return 0;
-  return state.metricsByExercise[normalized]?.score || 0;
+  return coreGetExerciseScore(state.metricsByExercise, exerciseKey);
 }
 
 function getExpectedExerciseKeysForMode(mode, sampleRounds = 24) {
@@ -1245,7 +1219,7 @@ function applyPdDelta(pdDelta) {
 function applyDifficultyDelta(deltaSteps) {
   const beforePd = difficultyToPd(state.difficultySteps, state.monitorWidthIn, state.viewDistanceIn);
   const maxDifficultySteps = pdToDifficultySteps(ABSOLUTE_PD_MAX, state.monitorWidthIn, state.viewDistanceIn);
-  state.difficultySteps = Math.min(maxDifficultySteps, Math.max(0, state.difficultySteps + deltaSteps));
+  state.difficultySteps = coreClampDifficultySteps(state.difficultySteps + deltaSteps, maxDifficultySteps);
   state.currentPd = difficultyToPd(state.difficultySteps, state.monitorWidthIn, state.viewDistanceIn);
   state.bestPd = Math.max(state.bestPd, state.currentPd);
   return state.currentPd - beforePd;

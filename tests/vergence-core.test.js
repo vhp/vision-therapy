@@ -103,6 +103,38 @@ test("PD deltas convert to difficulty steps that reproduce the same PD change", 
   assert.equal(core.pdDeltaToDifficultySteps(Number.NaN, monitorWidthIn, viewDistanceIn, screenWidthPx, splitGainPxPerStep), 0);
 });
 
+test("scoring events accumulate per-exercise metrics", () => {
+  const metrics = Object.create(null);
+
+  assert.deepEqual(core.recordScoringEvent(metrics, "correct", "Convergence"), {
+    exerciseKey: "convergence",
+    scoreDelta: 1,
+    exerciseScore: 1
+  });
+  core.recordScoringEvent(metrics, "correct", "convergence");
+  core.recordScoringEvent(metrics, "wrong", "convergence");
+  core.recordScoringEvent(metrics, "timeout", "divergence");
+  core.recordScoringEvent(metrics, "skip", "");
+
+  assert.deepEqual(metrics.convergence, { score: 1, correct: 2, wrong: 1, skip: 0, timeout: 0 });
+  assert.deepEqual(metrics.divergence, { score: -1, correct: 0, wrong: 0, skip: 0, timeout: 1 });
+  assert.deepEqual(metrics.unassigned, { score: -1, correct: 0, wrong: 0, skip: 1, timeout: 0 });
+
+  assert.equal(core.getExerciseScore(metrics, " CONVERGENCE "), 1);
+  assert.equal(core.getExerciseScore(metrics, "vergence_up"), 0);
+  assert.equal(core.getExerciseScore(metrics, ""), 0);
+
+  const unknown = core.recordScoringEvent(metrics, "mystery", "convergence");
+  assert.equal(unknown.scoreDelta, 0);
+  assert.equal(metrics.convergence.score, 1);
+});
+
+test("difficulty steps clamp to the allowed range", () => {
+  assert.equal(core.clampDifficultySteps(-2, 50), 0);
+  assert.equal(core.clampDifficultySteps(12.5, 50), 12.5);
+  assert.equal(core.clampDifficultySteps(80, 50), 50);
+});
+
 test("canvas metrics follow rendered display size", () => {
   const canvas = {
     clientWidth: 960,

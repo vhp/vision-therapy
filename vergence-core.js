@@ -145,6 +145,51 @@
     return relativeSplitPx / splitGainPxPerStep;
   }
 
+  function normalizeExerciseKey(value) {
+    if (typeof value !== "string") return "";
+    return value.trim().toLowerCase();
+  }
+
+  function createEmptyExerciseMetrics() {
+    return { score: 0, correct: 0, wrong: 0, skip: 0, timeout: 0 };
+  }
+
+  function recordScoringEvent(metricsByExercise, outcomeType, exerciseKey) {
+    const normalized = normalizeExerciseKey(exerciseKey) || "unassigned";
+    if (!metricsByExercise[normalized]) {
+      metricsByExercise[normalized] = createEmptyExerciseMetrics();
+    }
+    const metrics = metricsByExercise[normalized];
+
+    let scoreDelta = 0;
+    if (outcomeType === "correct") {
+      scoreDelta = 1;
+      metrics.correct += 1;
+    } else if (outcomeType === "wrong") {
+      scoreDelta = -1;
+      metrics.wrong += 1;
+    } else if (outcomeType === "skip") {
+      scoreDelta = -1;
+      metrics.skip += 1;
+    } else if (outcomeType === "timeout") {
+      scoreDelta = -1;
+      metrics.timeout += 1;
+    }
+
+    metrics.score += scoreDelta;
+    return { exerciseKey: normalized, scoreDelta, exerciseScore: metrics.score };
+  }
+
+  function getExerciseScore(metricsByExercise, exerciseKey) {
+    const normalized = normalizeExerciseKey(exerciseKey);
+    if (!normalized) return 0;
+    return metricsByExercise[normalized]?.score || 0;
+  }
+
+  function clampDifficultySteps(steps, maxSteps) {
+    return Math.min(maxSteps, Math.max(0, steps));
+  }
+
   function pdDeltaToDifficultySteps(
     pdDelta,
     monitorWidthIn,
@@ -243,6 +288,11 @@
     getVerticalPolaritySign,
     getVergenceVector,
     getTotalSplitPx,
+    normalizeExerciseKey,
+    createEmptyExerciseMetrics,
+    recordScoringEvent,
+    getExerciseScore,
+    clampDifficultySteps,
     getMmPerPixel,
     splitPxToPd,
     pdToSplitPx,
