@@ -151,7 +151,7 @@
   }
 
   function createEmptyExerciseMetrics() {
-    return { score: 0, correct: 0, wrong: 0, skip: 0, timeout: 0 };
+    return { score: 0, correct: 0, wrong: 0, skip: 0, timeout: 0, suppression: 0 };
   }
 
   function recordScoringEvent(metricsByExercise, outcomeType, exerciseKey) {
@@ -174,6 +174,10 @@
     } else if (outcomeType === "timeout") {
       scoreDelta = -1;
       metrics.timeout += 1;
+    } else if (outcomeType === "suppression") {
+      // A suppression report is a fusion-quality signal, not a task answer,
+      // so it counts as an event but never moves the score.
+      metrics.suppression += 1;
     }
 
     metrics.score += scoreDelta;

@@ -116,9 +116,15 @@ test("scoring events accumulate per-exercise metrics", () => {
   core.recordScoringEvent(metrics, "timeout", "divergence");
   core.recordScoringEvent(metrics, "skip", "");
 
-  assert.deepEqual(metrics.convergence, { score: 1, correct: 2, wrong: 1, skip: 0, timeout: 0 });
-  assert.deepEqual(metrics.divergence, { score: -1, correct: 0, wrong: 0, skip: 0, timeout: 1 });
-  assert.deepEqual(metrics.unassigned, { score: -1, correct: 0, wrong: 0, skip: 1, timeout: 0 });
+  core.recordScoringEvent(metrics, "suppression", "convergence");
+
+  assert.deepEqual(metrics.convergence, { score: 1, correct: 2, wrong: 1, skip: 0, timeout: 0, suppression: 1 });
+  assert.deepEqual(metrics.divergence, { score: -1, correct: 0, wrong: 0, skip: 0, timeout: 1, suppression: 0 });
+  assert.deepEqual(metrics.unassigned, { score: -1, correct: 0, wrong: 0, skip: 1, timeout: 0, suppression: 0 });
+
+  const suppression = core.recordScoringEvent(metrics, "suppression", "divergence");
+  assert.equal(suppression.scoreDelta, 0);
+  assert.equal(metrics.divergence.score, -1);
 
   assert.equal(core.getExerciseScore(metrics, " CONVERGENCE "), 1);
   assert.equal(core.getExerciseScore(metrics, "vergence_up"), 0);

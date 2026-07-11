@@ -212,6 +212,7 @@ const sumCorrectEl = document.getElementById("sumCorrect");
 const sumWrongEl = document.getElementById("sumWrong");
 const sumTimeoutsEl = document.getElementById("sumTimeouts");
 const sumSkipsEl = document.getElementById("sumSkips");
+const sumSuppressionsEl = document.getElementById("sumSuppressions");
 
 const canvas = document.getElementById("viewer");
 const ctx = canvas.getContext("2d");
@@ -256,7 +257,8 @@ if (
   !sumCorrectEl ||
   !sumWrongEl ||
   !sumTimeoutsEl ||
-  !sumSkipsEl
+  !sumSkipsEl ||
+  !sumSuppressionsEl
 ) {
   throw new Error("Summary element(s) missing.");
 }
@@ -284,6 +286,7 @@ const state = {
   wrongCount: 0,
   skipCount: 0,
   timeoutCount: 0,
+  suppressionCount: 0,
   staircaseStreak: 0,
   metricsByExercise: Object.create(null),
   vergenceRanges: Object.create(null),
@@ -588,16 +591,33 @@ function onKeyDown(event) {
   if (hasKeyModifier(event)) {
     // Never score a modified keypress, but keep shortcuts like Cmd+ArrowLeft
     // (history back) from killing a live session.
-    if (state.running && (event.code === "Space" || SIDE_KEYS[event.key])) {
+    if (state.running && (event.code === "Space" || event.code === "KeyS" || SIDE_KEYS[event.key])) {
       event.preventDefault();
     }
     return;
   }
   if (!state.running) return;
   if (state.awaitingNextRound) {
-    if (event.code === "Space" || SIDE_KEYS[event.key]) {
+    if (event.code === "Space" || event.code === "KeyS" || SIDE_KEYS[event.key]) {
       event.preventDefault();
     }
+    return;
+  }
+
+  if (event.code === "KeyS") {
+    event.preventDefault();
+    state.lastResponseTs = performance.now();
+    const suppressionScore = recordScoringEvent("suppression", state.roundVergence);
+    state.staircaseStreak = 0;
+    const pdDelta = applyPdDelta(-PD_LOSS_PER_ERROR);
+    setRoundDebugState("suppression", "s", state.targetSide, pdDelta);
+    playNegativeFeedbackBeep();
+    updateStatus(
+      `Suppression reported (${formatExerciseLabel(suppressionScore.exerciseKey)}). Demand reduced. Blink and refocus; both marker dots should stay visible.`,
+      true
+    );
+    updateHud();
+    startRound();
     return;
   }
 
@@ -1130,6 +1150,7 @@ function resetScoringState() {
   state.wrongCount = 0;
   state.skipCount = 0;
   state.timeoutCount = 0;
+  state.suppressionCount = 0;
   state.staircaseStreak = 0;
   state.metricsByExercise = Object.create(null);
   state.vergenceRanges = Object.create(null);
@@ -1146,6 +1167,7 @@ function recordScoringEvent(outcomeType, exerciseKey) {
   else if (outcomeType === "wrong") state.wrongCount += 1;
   else if (outcomeType === "skip") state.skipCount += 1;
   else if (outcomeType === "timeout") state.timeoutCount += 1;
+  else if (outcomeType === "suppression") state.suppressionCount += 1;
 
   state.score += result.scoreDelta;
   return { ...result, totalScore: state.score };
@@ -1629,6 +1651,20 @@ function renderScene() {
     trainingActive ? state.targetSide : "up",
     trainingActive
   );
+  if (trainingActive) {
+    drawSuppressionMarkers(ctx, cx, cy, fieldGeometry.extent);
+  }
+}
+
+// One marker per eye channel, outside the fused field: if either fades from
+// view, that eye is suppressing and the user reports it with S.
+function drawSuppressionMarkers(context, cx, cy, extent) {
+  const offset = extent * 1.12;
+  const size = 5;
+  context.fillStyle = LEFT_DOT_COLOR;
+  context.fillRect(cx - size / 2, cy - offset - size, size, size);
+  context.fillStyle = RIGHT_DOT_COLOR;
+  context.fillRect(cx - size / 2, cy + offset, size, size);
 }
 
 function drawStereoFieldGlow(context, leftEyeCenter, rightEyeCenter, fieldGeometry) {
@@ -2003,6 +2039,7 @@ function showSummaryCard(reachedGoal) {
   sumWrongEl.textContent = String(state.wrongCount);
   sumTimeoutsEl.textContent = String(state.timeoutCount);
   sumSkipsEl.textContent = String(state.skipCount);
+  sumSuppressionsEl.textContent = String(state.suppressionCount);
   summaryCardEl.classList.remove("hidden");
 }
 
