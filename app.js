@@ -51,6 +51,8 @@ const {
   PD_GAIN_PER_CORRECT,
   PD_LOSS_PER_ERROR = 1,
   STAIRCASE_CORRECT_PER_STEP_UP = 3,
+  FACILITY_BASE_IN_PD = 3,
+  FACILITY_BASE_OUT_PD = 12,
   INACTIVITY_PAUSE_MS,
   NEXT_ROUND_DELAY_MS,
   CONFIG_STORAGE_KEY,
@@ -94,6 +96,7 @@ const FALLBACK_VERGENCE_MODES = Object.freeze([
   { value: "divergence", label: "Divergence" },
   { value: "alternate", label: "Jump Vergence (Alternating)" },
   { value: "random_jump", label: "Jump Vergence (Random)" },
+  { value: "facility", label: "Vergence Facility (3Δ / 12Δ)" },
   { value: "vergence_up", label: "Vergence Up" },
   { value: "vergence_down", label: "Vergence Down" }
 ]);
@@ -206,6 +209,7 @@ const sumGoalPdEl = document.getElementById("sumGoalPd");
 const sumScoreEl = document.getElementById("sumScore");
 const sumExerciseScoresEl = document.getElementById("sumExerciseScores");
 const sumRangesEl = document.getElementById("sumRanges");
+const sumFacilityEl = document.getElementById("sumFacility");
 const sumRoundsEl = document.getElementById("sumRounds");
 const sumDurationEl = document.getElementById("sumDuration");
 const sumCorrectEl = document.getElementById("sumCorrect");
@@ -252,6 +256,7 @@ if (
   !sumScoreEl ||
   !sumExerciseScoresEl ||
   !sumRangesEl ||
+  !sumFacilityEl ||
   !sumRoundsEl ||
   !sumDurationEl ||
   !sumCorrectEl ||
@@ -288,6 +293,7 @@ const state = {
   timeoutCount: 0,
   suppressionCount: 0,
   staircaseStreak: 0,
+  facilityPhase: 0,
   metricsByExercise: Object.create(null),
   vergenceRanges: Object.create(null),
   sessionDurationMs: DEFAULT_SESSION_MINUTES * 60_000,
@@ -389,6 +395,7 @@ function startSession() {
   resetScoringState();
   applyConfigToState(config);
   state.round = 0;
+  state.facilityPhase = 0;
   state.modeSequenceSeed = ((Math.random() * 0xffffffff) | 0) >>> 0;
   state.roundVergence = resolveRoundVergence(config.vergenceMode, 1, state.modeSequenceSeed);
 
@@ -422,6 +429,7 @@ function resetSession() {
   resetScoringState();
   applyConfigToState(config);
   state.round = 0;
+  state.facilityPhase = 0;
   state.modeSequenceSeed = 0;
   state.roundVergence = resolveRoundVergence(config.vergenceMode, 1, state.modeSequenceSeed);
   state.targetSide = "up";
@@ -522,6 +530,18 @@ function startRound() {
 
   state.round += 1;
   state.roundVergence = resolveRoundVergence(state.vergenceMode, state.round, state.modeSequenceSeed);
+  if (isFacilityMode()) {
+    // Facility phase advances only on correct answers, so a missed pair is
+    // retried at the same fixed demand instead of drifting like the staircase.
+    state.roundVergence = resolveRoundVergence("facility", state.facilityPhase + 1, state.modeSequenceSeed);
+    state.difficultySteps = pdToDifficultySteps(
+      getFacilityDemandPd(state.roundVergence),
+      state.monitorWidthIn,
+      state.viewDistanceIn
+    );
+    state.currentPd = difficultyToPd(state.difficultySteps, state.monitorWidthIn, state.viewDistanceIn);
+    state.bestPd = Math.max(state.bestPd, state.currentPd);
+  }
   state.targetSide = SIDES[(Math.random() * SIDES.length) | 0];
   state.roundSeed = ((Math.random() * 0xffffffff) | 0) >>> 0;
   state.roundStartTs = now;
@@ -568,7 +588,7 @@ function handleRoundTimeout() {
 
   const timeoutScore = recordScoringEvent("timeout", state.roundVergence);
   state.staircaseStreak = 0;
-  const pdDelta = applyPdDelta(-PD_LOSS_PER_ERROR);
+  const pdDelta = isFacilityMode() ? 0 : applyPdDelta(-PD_LOSS_PER_ERROR);
   setRoundDebugState("timeout", "-", state.targetSide, pdDelta);
   playNegativeFeedbackBeep();
   updateStatus(`Round timeout (${formatExerciseLabel(timeoutScore.exerciseKey)}). Score -1.`, true);
@@ -609,7 +629,7 @@ function onKeyDown(event) {
     state.lastResponseTs = performance.now();
     const suppressionScore = recordScoringEvent("suppression", state.roundVergence);
     state.staircaseStreak = 0;
-    const pdDelta = applyPdDelta(-PD_LOSS_PER_ERROR);
+    const pdDelta = isFacilityMode() ? 0 : applyPdDelta(-PD_LOSS_PER_ERROR);
     setRoundDebugState("suppression", "s", state.targetSide, pdDelta);
     playNegativeFeedbackBeep();
     updateStatus(
@@ -628,7 +648,7 @@ function onKeyDown(event) {
     state.staircaseStreak = 0;
     const breakRecorded = coreRecordRangeBreak(state.vergenceRanges, state.roundVergence, state.currentPd);
     const breakText = breakRecorded ? ` Break recorded at ${formatPd(state.currentPd)}Δ.` : "";
-    const pdDelta = applyPdDelta(-PD_LOSS_PER_ERROR);
+    const pdDelta = isFacilityMode() ? 0 : applyPdDelta(-PD_LOSS_PER_ERROR);
     setRoundDebugState("skip", "space", state.targetSide, pdDelta);
     playNegativeFeedbackBeep();
     updateStatus(`Marked unseen (${formatExerciseLabel(skipScore.exerciseKey)}). Score -1.${breakText} New stereogram.`, true);
@@ -647,15 +667,22 @@ function onKeyDown(event) {
   if (correct) {
     const correctScore = recordScoringEvent("correct", state.roundVergence);
     const recoveryPair = coreRecordRangeRecovery(state.vergenceRanges, state.roundVergence, state.currentPd);
-    const staircase = coreAdvanceStaircase(state.staircaseStreak, "correct", STAIRCASE_CORRECT_PER_STEP_UP);
-    state.staircaseStreak = staircase.consecutiveCorrect;
-    const pdDelta = staircase.direction > 0 ? applyPdDelta(PD_GAIN_PER_CORRECT) : 0;
+    let pdDelta = 0;
+    let progressText;
+    if (isFacilityMode()) {
+      state.facilityPhase += 1;
+      progressText = `Cycles ${getFacilityCycles()} (${getFacilityCpm().toFixed(1)} cpm).`;
+    } else {
+      const staircase = coreAdvanceStaircase(state.staircaseStreak, "correct", STAIRCASE_CORRECT_PER_STEP_UP);
+      state.staircaseStreak = staircase.consecutiveCorrect;
+      pdDelta = staircase.direction > 0 ? applyPdDelta(PD_GAIN_PER_CORRECT) : 0;
+      progressText = staircase.direction > 0
+        ? `Demand up to ${formatPd(state.currentPd)}Δ.`
+        : `Streak ${staircase.consecutiveCorrect}/${STAIRCASE_CORRECT_PER_STEP_UP} at ${formatPd(state.currentPd)}Δ.`;
+    }
     setRoundDebugState("correct", side, state.targetSide, pdDelta);
     playPositiveFeedbackBeep();
 
-    let progressText = staircase.direction > 0
-      ? `Demand up to ${formatPd(state.currentPd)}Δ.`
-      : `Streak ${staircase.consecutiveCorrect}/${STAIRCASE_CORRECT_PER_STEP_UP} at ${formatPd(state.currentPd)}Δ.`;
     if (recoveryPair) {
       progressText = `Recovery at ${formatPd(recoveryPair.recoveryPd)}Δ (break ${formatPd(recoveryPair.breakPd)}Δ). ${progressText}`;
     }
@@ -671,7 +698,7 @@ function onKeyDown(event) {
   } else {
     const wrongScore = recordScoringEvent("wrong", state.roundVergence);
     state.staircaseStreak = 0;
-    const pdDelta = applyPdDelta(-PD_LOSS_PER_ERROR);
+    const pdDelta = isFacilityMode() ? 0 : applyPdDelta(-PD_LOSS_PER_ERROR);
     setRoundDebugState("wrong", side, state.targetSide, pdDelta);
     playNegativeFeedbackBeep();
     updateStatus(`Wrong (${side}, ${formatExerciseLabel(wrongScore.exerciseKey)}). Score -1.`, true);
@@ -1179,7 +1206,7 @@ function getExerciseScore(exerciseKey) {
 
 function getExpectedExerciseKeysForMode(mode, sampleRounds = 24) {
   const normalizedMode = normalizeVergenceMode(mode);
-  if (normalizedMode === "alternate" || normalizedMode === "random_jump") {
+  if (normalizedMode === "alternate" || normalizedMode === "random_jump" || normalizedMode === "facility") {
     return ["convergence", "divergence"];
   }
   const keys = new Set();
@@ -1256,6 +1283,30 @@ function formatRangesSummaryText() {
     .sort((a, b) => formatExerciseLabel(a.key).localeCompare(formatExerciseLabel(b.key)))
     .map(entry => `${formatExerciseShortCode(entry.key)} ${formatPd(entry.pair.breakPd)}/${formatPd(entry.pair.recoveryPd)}Δ`);
   return parts.length > 0 ? parts.join(" | ") : "-";
+}
+
+function isFacilityMode() {
+  return normalizeVergenceMode(state.vergenceMode) === "facility";
+}
+
+function getFacilityDemandPd(roundVergence) {
+  return roundVergence === "divergence" ? FACILITY_BASE_IN_PD : FACILITY_BASE_OUT_PD;
+}
+
+function getFacilityCycles() {
+  return Math.floor(state.facilityPhase / 2);
+}
+
+function getSessionElapsedMs() {
+  if (state.sessionEndTs <= 0) return 0;
+  const clockNow = state.paused && state.pausedAtTs > 0 ? state.pausedAtTs : state.nowTs;
+  return Math.max(0, state.sessionDurationMs - Math.max(0, state.sessionEndTs - clockNow));
+}
+
+function getFacilityCpm() {
+  const elapsedMs = getSessionElapsedMs();
+  if (elapsedMs < 1000) return 0;
+  return getFacilityCycles() / (elapsedMs / 60_000);
 }
 
 // Scoring deltas are configured in prism diopters; convert to steps so the
@@ -1418,7 +1469,7 @@ function getVergenceModeGroupLabel(modeValue) {
   if (modeValue === "convergence" || modeValue === "divergence") {
     return "Horizontal Basics";
   }
-  if (modeValue === "alternate" || modeValue === "random_jump") {
+  if (modeValue === "alternate" || modeValue === "random_jump" || modeValue === "facility") {
     return "Horizontal Jump";
   }
   if (modeValue === "vergence_up" || modeValue === "vergence_down") {
@@ -2014,11 +2065,12 @@ function syncPauseCard() {
 function formatPauseVergenceLabel() {
   const configured = normalizeVergenceMode(state.vergenceMode);
   const configuredLabel = formatVergenceLabel(configured);
-  if (configured !== "alternate" && configured !== "random_jump") {
+  if (configured !== "alternate" && configured !== "random_jump" && configured !== "facility") {
     return configuredLabel;
   }
 
-  const currentRoundLabel = formatVergenceLabel(resolveRoundVergence(configured, state.round || 1, state.modeSequenceSeed));
+  const roundArg = configured === "facility" ? state.facilityPhase + 1 : state.round || 1;
+  const currentRoundLabel = formatVergenceLabel(resolveRoundVergence(configured, roundArg, state.modeSequenceSeed));
   return `${configuredLabel} (current round: ${currentRoundLabel})`;
 }
 
@@ -2033,6 +2085,9 @@ function showSummaryCard(reachedGoal) {
   sumScoreEl.textContent = String(state.score);
   sumExerciseScoresEl.textContent = formatExerciseScoresSummaryText();
   sumRangesEl.textContent = formatRangesSummaryText();
+  sumFacilityEl.textContent = isFacilityMode()
+    ? `${getFacilityCycles()} cycles, ${getFacilityCpm().toFixed(1)} cpm`
+    : "-";
   sumRoundsEl.textContent = String(state.round);
   sumDurationEl.textContent = formatClock(state.sessionDurationMs);
   sumCorrectEl.textContent = String(state.correctCount);

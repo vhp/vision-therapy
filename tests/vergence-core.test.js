@@ -29,6 +29,8 @@ test("vergence scheduling behaves as expected", () => {
   assert.equal(core.resolveRoundVergence("alternate", 2, 0), "divergence");
   assert.equal(core.resolveRoundVergence("divergence", 3, 0), "divergence");
   assert.equal(core.resolveRoundVergence("vergence_up", 4, 0), "vergence_up");
+  assert.equal(core.resolveRoundVergence("facility", 1, 0), "convergence");
+  assert.equal(core.resolveRoundVergence("facility", 2, 0), "divergence");
 
   const sequenceA = Array.from({ length: 8 }, (_, index) => core.resolveRoundVergence("random_jump", index + 1, 12345));
   const sequenceB = Array.from({ length: 8 }, (_, index) => core.resolveRoundVergence("random_jump", index + 1, 12345));

@@ -6,6 +6,8 @@ window.APP_CONFIG = Object.freeze({
   PD_GAIN_PER_CORRECT: 0.75,
   PD_LOSS_PER_ERROR: 1,
   STAIRCASE_CORRECT_PER_STEP_UP: 3,
+  FACILITY_BASE_IN_PD: 3,
+  FACILITY_BASE_OUT_PD: 12,
   INACTIVITY_PAUSE_MS: 5 * 60_000,
   NEXT_ROUND_DELAY_MS: 380,
   CONFIG_STORAGE_KEY: "vergence_trainer.config.v1",
@@ -41,6 +43,7 @@ window.APP_CONFIG = Object.freeze({
     { value: "divergence", label: "Divergence" },
     { value: "alternate", label: "Jump Vergence (Alternating)" },
     { value: "random_jump", label: "Jump Vergence (Random)" },
+    { value: "facility", label: "Vergence Facility (3Δ / 12Δ)" },
     { value: "vergence_up", label: "Vergence Up" },
     { value: "vergence_down", label: "Vergence Down" }
   ],

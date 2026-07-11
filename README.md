@@ -69,7 +69,12 @@ When paused (for example after `Esc`):
 
 ## Modes and Presets
 
-- Vergence modes: `Convergence`, `Divergence`, `Jump Vergence (Alternating)`, `Jump Vergence (Random)`, `Vergence Up`, `Vergence Down`.
+- Vergence modes: `Convergence`, `Divergence`, `Jump Vergence (Alternating)`, `Jump Vergence (Random)`, `Vergence Facility (3Δ / 12Δ)`, `Vergence Up`, `Vergence Down`.
+- Facility mode alternates a fixed base-in/base-out demand pair
+  (`FACILITY_BASE_IN_PD` / `FACILITY_BASE_OUT_PD`, default 3Δ/12Δ). The pair
+  advances only on correct answers, demand never drifts, and the session
+  summary reports completed cycles and cycles per minute, matching the
+  clinical vergence facility test.
 - Mode labels in this project are generic clinical/task labels rather than references to any outside product naming.
 - Visual presets (from `config.js`):
   - `Balanced (Default)`

@@ -56,7 +56,7 @@
 
   function resolveRoundVergence(vergenceMode, round, sequenceSeed) {
     const normalized = typeof vergenceMode === "string" ? vergenceMode.trim().toLowerCase() : "";
-    if (normalized === "alternate") {
+    if (normalized === "alternate" || normalized === "facility") {
       return round % 2 === 0 ? "divergence" : "convergence";
     }
     if (normalized === "random_jump") {

@@ -57,6 +57,15 @@ const MODE_SCENARIOS = [
     expectedAxis: "H"
   },
   {
+    label: "Vergence Facility",
+    vergenceMode: "facility",
+    fieldShape: "square",
+    verticalPolarity: "standard",
+    expectedInitialExercises: ["Convergence"],
+    expectedNextExercises: ["Divergence"],
+    expectedAxis: "H"
+  },
+  {
     label: "Vergence Up / Square",
     vergenceMode: "vergence_up",
     fieldShape: "square",
