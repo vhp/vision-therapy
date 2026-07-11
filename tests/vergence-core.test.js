@@ -17,6 +17,13 @@ test("debug difficulty hotkeys map the supported keys", () => {
   assert.equal(core.getDebugDifficultyDirection({ code: "KeyA", key: "a" }), 0);
 });
 
+test("debug difficulty hotkeys ignore modified keypresses", () => {
+  assert.equal(core.getDebugDifficultyDirection({ code: "Equal", key: "=", metaKey: true }), 0);
+  assert.equal(core.getDebugDifficultyDirection({ code: "Minus", key: "-", ctrlKey: true }), 0);
+  assert.equal(core.getDebugDifficultyDirection({ code: "BracketRight", key: "]", altKey: true }), 0);
+  assert.equal(core.getDebugDifficultyDirection({ code: "Minus", key: "-", ctrlKey: false }), -1);
+});
+
 test("vergence scheduling behaves as expected", () => {
   assert.equal(core.resolveRoundVergence("alternate", 1, 0), "convergence");
   assert.equal(core.resolveRoundVergence("alternate", 2, 0), "divergence");
@@ -65,6 +72,35 @@ test("difficulty and PD conversions round trip", () => {
   );
 
   assert(Math.abs(recoveredPd - targetPd) < 1e-9);
+});
+
+test("PD deltas convert to difficulty steps that reproduce the same PD change", () => {
+  const monitorWidthIn = 24;
+  const viewDistanceIn = 16;
+  const screenWidthPx = 1920;
+  const baseTotalSplitPx = 8;
+  const splitGainPxPerStep = 7;
+  const startSteps = 10;
+
+  for (const pdDelta of [0.75, -1, 2.5]) {
+    const deltaSteps = core.pdDeltaToDifficultySteps(
+      pdDelta,
+      monitorWidthIn,
+      viewDistanceIn,
+      screenWidthPx,
+      splitGainPxPerStep
+    );
+    const before = core.difficultyToPd(
+      startSteps, monitorWidthIn, viewDistanceIn, screenWidthPx, baseTotalSplitPx, splitGainPxPerStep
+    );
+    const after = core.difficultyToPd(
+      startSteps + deltaSteps, monitorWidthIn, viewDistanceIn, screenWidthPx, baseTotalSplitPx, splitGainPxPerStep
+    );
+    assert(Math.abs(after - before - pdDelta) < 1e-9, `pdDelta ${pdDelta} reproduced`);
+  }
+
+  assert.equal(core.pdDeltaToDifficultySteps(0, monitorWidthIn, viewDistanceIn, screenWidthPx, splitGainPxPerStep), 0);
+  assert.equal(core.pdDeltaToDifficultySteps(Number.NaN, monitorWidthIn, viewDistanceIn, screenWidthPx, splitGainPxPerStep), 0);
 });
 
 test("canvas metrics follow rendered display size", () => {

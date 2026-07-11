@@ -36,6 +36,7 @@
   }
 
   function getDebugDifficultyDirection(event) {
+    if (event?.ctrlKey || event?.metaKey || event?.altKey) return 0;
     const key = typeof event?.key === "string" ? event.key : "";
     const code = typeof event?.code === "string" ? event.code : "";
     if (code === "NumpadAdd") return 1;
@@ -144,6 +145,24 @@
     return relativeSplitPx / splitGainPxPerStep;
   }
 
+  function pdDeltaToDifficultySteps(
+    pdDelta,
+    monitorWidthIn,
+    viewDistanceIn,
+    screenWidthPx,
+    splitGainPxPerStep
+  ) {
+    if (!Number.isFinite(pdDelta) || pdDelta === 0) return 0;
+    const magnitude = pdToDifficultySteps(
+      Math.abs(pdDelta),
+      monitorWidthIn,
+      viewDistanceIn,
+      screenWidthPx,
+      splitGainPxPerStep
+    );
+    return Math.sign(pdDelta) * magnitude;
+  }
+
   function getCanvasViewportSize(canvas, fallbackWidth, fallbackHeight) {
     const safeFallbackWidth = Number.isFinite(fallbackWidth) && fallbackWidth > 0 ? fallbackWidth : 680;
     const safeFallbackHeight = Number.isFinite(fallbackHeight) && fallbackHeight > 0 ? fallbackHeight : safeFallbackWidth;
@@ -229,6 +248,7 @@
     pdToSplitPx,
     difficultyToPd,
     pdToDifficultySteps,
+    pdDeltaToDifficultySteps,
     getCanvasViewportSize,
     getCanvasMetrics,
     getFieldExtent,

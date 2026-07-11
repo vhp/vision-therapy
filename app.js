@@ -28,6 +28,7 @@ const {
   pdToSplitPx: corePdToSplitPx,
   difficultyToPd: coreDifficultyToPd,
   pdToDifficultySteps: corePdToDifficultySteps,
+  pdDeltaToDifficultySteps: corePdDeltaToDifficultySteps,
   getCanvasMetrics: coreGetCanvasMetrics,
   getFieldExtent: coreGetFieldExtent,
   normalizeDisplayContext: coreNormalizeDisplayContext,
@@ -285,6 +286,8 @@ const state = {
   sessionEndTs: 0,
   lastResponseTs: performance.now(),
   nowTs: performance.now(),
+  pausedAtTs: 0,
+  confirmedDisplayContext: null,
   dots: buildDotField(INITIAL_DOT_COUNT, getFieldExtent(), 1001, DEFAULT_VISUAL_TUNING),
   lastRoundEvent: "idle",
   lastInputSide: "-",
@@ -299,25 +302,32 @@ let audioCtx = null;
 let wasFullscreenActive = isFullscreenActive();
 let viewportRefreshFrameId = null;
 
+let startInFlight = false;
+
 startBtn.addEventListener("click", async () => {
-  if (state.running) return;
-  if (!state.paused && !state.monitorWidthConfirmed) {
-    updateStatus(
-      state.monitorWidthNeedsReconfirm
-        ? "Reconfirm Monitor Width in Advanced Settings before starting because the display context changed."
-        : "Set and confirm Monitor Width in Advanced Settings before starting. This is saved for future sessions.",
-      true
-    );
-    focusMonitorWidthInput();
-    return;
+  if (startInFlight || state.running) return;
+  startInFlight = true;
+  try {
+    if (!state.paused && state.monitorWidthConfirmed && detectDisplayContextChange()) {
+      updateStatus(getMonitorWidthBlockedMessage(), true);
+      focusMonitorWidthInput();
+      return;
+    }
+    if (!state.paused && !state.monitorWidthConfirmed) {
+      updateStatus(getMonitorWidthBlockedMessage(), true);
+      focusMonitorWidthInput();
+      return;
+    }
+    ensureAudioContext();
+    await requestFullscreenOnStart();
+    if (state.paused) {
+      resumeSession();
+      return;
+    }
+    startSession();
+  } finally {
+    startInFlight = false;
   }
-  ensureAudioContext();
-  await requestFullscreenOnStart();
-  if (state.paused) {
-    resumeSession();
-    return;
-  }
-  startSession();
 });
 resetBtn.addEventListener("click", resetSession);
 
@@ -359,6 +369,7 @@ function startSession() {
 
   state.running = true;
   state.paused = false;
+  state.pausedAtTs = 0;
   resetScoringState();
   applyConfigToState(config);
   state.round = 0;
@@ -391,6 +402,7 @@ function resetSession() {
 
   state.running = false;
   state.paused = false;
+  state.pausedAtTs = 0;
   resetScoringState();
   applyConfigToState(config);
   state.round = 0;
@@ -415,12 +427,7 @@ function resetSession() {
   hideSummaryCard();
 
   if (!state.monitorWidthConfirmed) {
-    updateStatus(
-      state.monitorWidthNeedsReconfirm
-        ? "Reset complete. Reconfirm Monitor Width in Advanced Settings before starting because the display context changed."
-        : "Reset complete. Set and confirm Monitor Width in Advanced Settings before starting. This is saved for future sessions.",
-      true
-    );
+    updateStatus(`Reset complete. ${getMonitorWidthBlockedMessage()}`, true);
   } else {
     updateStatus(
       `Reset complete. Press Start for ${config.sessionMinutes} min. Round ${config.roundSeconds}s, start ${formatPd(state.currentPd)}Δ, session target ${formatPd(config.goalPd)}Δ, mode ${formatVergenceLabel(config.vergenceMode)}, visual ${formatVisualPresetLabel(config.visualPreset)}.`
@@ -436,6 +443,7 @@ function onConfigChange(event) {
     const monitorWidthCandidate = Number.parseFloat(monitorWidthInput.value);
     state.monitorWidthConfirmed = Number.isFinite(monitorWidthCandidate);
     state.monitorWidthNeedsReconfirm = false;
+    state.confirmedDisplayContext = state.monitorWidthConfirmed ? getCurrentDisplayContext() : null;
   }
 
   const config = readConfigInputs();
@@ -543,7 +551,7 @@ function handleRoundTimeout() {
   stopRoundTicker();
 
   const timeoutScore = recordScoringEvent("timeout", state.roundVergence);
-  const pdDelta = applyDifficultyDelta(-PD_LOSS_PER_ERROR);
+  const pdDelta = applyPdDelta(-PD_LOSS_PER_ERROR);
   setRoundDebugState("timeout", "-", state.targetSide, pdDelta);
   playNegativeFeedbackBeep();
   updateStatus(`Round timeout (${formatExerciseLabel(timeoutScore.exerciseKey)}). Score -1.`, true);
@@ -563,6 +571,14 @@ function onKeyDown(event) {
   if (event.repeat && !shouldAllowRepeatedDebugHotkey(event)) return;
   if (handlePauseToggleHotkey(event)) return;
   if (handleDebugDifficultyHotkeys(event)) return;
+  if (hasKeyModifier(event)) {
+    // Never score a modified keypress, but keep shortcuts like Cmd+ArrowLeft
+    // (history back) from killing a live session.
+    if (state.running && (event.code === "Space" || SIDE_KEYS[event.key])) {
+      event.preventDefault();
+    }
+    return;
+  }
   if (!state.running) return;
   if (state.awaitingNextRound) {
     if (event.code === "Space" || SIDE_KEYS[event.key]) {
@@ -575,7 +591,7 @@ function onKeyDown(event) {
     event.preventDefault();
     state.lastResponseTs = performance.now();
     const skipScore = recordScoringEvent("skip", state.roundVergence);
-    const pdDelta = applyDifficultyDelta(-PD_LOSS_PER_ERROR);
+    const pdDelta = applyPdDelta(-PD_LOSS_PER_ERROR);
     setRoundDebugState("skip", "space", state.targetSide, pdDelta);
     playNegativeFeedbackBeep();
     updateStatus(`Marked unseen (${formatExerciseLabel(skipScore.exerciseKey)}). Score -1. New stereogram.`, true);
@@ -593,7 +609,7 @@ function onKeyDown(event) {
 
   if (correct) {
     const correctScore = recordScoringEvent("correct", state.roundVergence);
-    const pdDelta = applyDifficultyDelta(PD_GAIN_PER_CORRECT);
+    const pdDelta = applyPdDelta(PD_GAIN_PER_CORRECT);
     setRoundDebugState("correct", side, state.targetSide, pdDelta);
     playPositiveFeedbackBeep();
 
@@ -608,7 +624,7 @@ function onKeyDown(event) {
     }
   } else {
     const wrongScore = recordScoringEvent("wrong", state.roundVergence);
-    const pdDelta = applyDifficultyDelta(-PD_LOSS_PER_ERROR);
+    const pdDelta = applyPdDelta(-PD_LOSS_PER_ERROR);
     setRoundDebugState("wrong", side, state.targetSide, pdDelta);
     playNegativeFeedbackBeep();
     updateStatus(`Wrong (${side}, ${formatExerciseLabel(wrongScore.exerciseKey)}). Score -1.`, true);
@@ -624,8 +640,13 @@ function shouldAllowRepeatedDebugHotkey(event) {
   return getDebugDifficultyDirection(event) !== 0;
 }
 
+function hasKeyModifier(event) {
+  return Boolean(event.ctrlKey || event.metaKey || event.altKey);
+}
+
 function handlePauseToggleHotkey(event) {
   if (event.code !== "KeyP") return false;
+  if (hasKeyModifier(event)) return false;
   if (isEditableTarget(event.target)) return false;
   if (!state.running && !state.paused) return false;
 
@@ -692,6 +713,7 @@ function endSession() {
   state.resumeStartsNextRound = false;
   state.running = false;
   state.paused = false;
+  state.pausedAtTs = 0;
   stopRoundTicker();
   state.nowTs = performance.now();
   setInputsDisabled(false);
@@ -765,6 +787,7 @@ function initializeConfigInputs() {
   const persistedConfig = hydratePersistedConfigIntoInputs();
   state.monitorWidthNeedsReconfirm = shouldRequireMonitorWidthReconfirm(persistedConfig);
   state.monitorWidthConfirmed = !state.monitorWidthNeedsReconfirm && getPersistedMonitorWidthConfirmed(persistedConfig);
+  state.confirmedDisplayContext = getPersistedDisplayContext(persistedConfig);
   const sanitizedConfig = readConfigInputs();
   applyConfigInputs(sanitizedConfig);
   persistConfig(sanitizedConfig);
@@ -779,7 +802,7 @@ function readConfigInputs() {
   const fieldShape = normalizeFieldShape(fieldShapeInput.value);
   const verticalPolarity = normalizeVerticalPolarity(verticalPolarityInput.value);
   const visualPreset = normalizeVisualPreset(visualPresetInput.value);
-  const startPdRaw = Number.parseInt(startPdInput.value, 10);
+  const startPdRaw = DEBUG_MODE ? Number.parseInt(startPdInput.value, 10) : DEFAULT_START_PD;
   const goalPdRaw = Number.parseInt(goalPdInput.value, 10);
   const sessionMinutesRaw = Number.parseInt(sessionMinutesInput.value, 10);
   const roundSecondsRaw = Number.parseInt(roundSecondsInput.value, 10);
@@ -827,7 +850,7 @@ function hydratePersistedConfigIntoInputs() {
   if (typeof persisted.visualPreset === "string") {
     visualPresetInput.value = persisted.visualPreset;
   }
-  if (Number.isFinite(persisted.startPd)) {
+  if (DEBUG_MODE && Number.isFinite(persisted.startPd)) {
     startPdInput.value = String(Math.trunc(persisted.startPd));
   }
   if (Number.isFinite(persisted.goalPd)) {
@@ -866,7 +889,8 @@ function persistConfig(config) {
   const payload = {
     monitorWidthIn: config.monitorWidthIn,
     monitorWidthConfirmed: state.monitorWidthConfirmed,
-    displayContext: getCurrentDisplayContext(),
+    monitorWidthNeedsReconfirm: state.monitorWidthNeedsReconfirm,
+    displayContext: state.confirmedDisplayContext,
     viewDistanceIn: config.viewDistanceIn,
     vergenceMode: config.vergenceMode,
     fieldShape: config.fieldShape,
@@ -928,6 +952,7 @@ function getPersistedDisplayContext(persisted) {
 
 function shouldRequireMonitorWidthReconfirm(persisted) {
   if (!persisted || typeof persisted !== "object") return false;
+  if (persisted.monitorWidthNeedsReconfirm === true) return true;
   if (!getPersistedMonitorWidthConfirmed(persisted)) return false;
   if (!Number.isFinite(persisted.monitorWidthIn)) return false;
 
@@ -935,6 +960,38 @@ function shouldRequireMonitorWidthReconfirm(persisted) {
   if (!savedDisplayContext) return true;
 
   return !coreIsSameDisplayContext(savedDisplayContext, getCurrentDisplayContext());
+}
+
+function detectDisplayContextChange() {
+  if (!state.monitorWidthConfirmed) return false;
+  if (coreIsSameDisplayContext(state.confirmedDisplayContext, getCurrentDisplayContext())) {
+    return false;
+  }
+
+  state.monitorWidthConfirmed = false;
+  state.monitorWidthNeedsReconfirm = true;
+  persistConfig(readConfigInputs());
+  syncMonitorWidthSetupUi();
+  return true;
+}
+
+function isZoomOnlyContextChange() {
+  const saved = state.confirmedDisplayContext;
+  if (!saved) return false;
+  const current = getCurrentDisplayContext();
+  return saved.screenWidth === current.screenWidth &&
+    saved.screenHeight === current.screenHeight &&
+    saved.devicePixelRatio !== current.devicePixelRatio;
+}
+
+function getMonitorWidthBlockedMessage() {
+  if (!state.monitorWidthNeedsReconfirm) {
+    return "Set and confirm Monitor Width in Advanced Settings before starting. This is saved for future sessions.";
+  }
+  if (isZoomOnlyContextChange()) {
+    return "Browser zoom or display scaling changed since Monitor Width was confirmed. Reset zoom to 100%, then reconfirm Monitor Width in Advanced Settings.";
+  }
+  return "Reconfirm Monitor Width in Advanced Settings before starting because the display context changed.";
 }
 
 function syncMonitorWidthSetupUi() {
@@ -956,17 +1013,7 @@ function updateReadyStatus(config) {
     `mode ${formatVergenceLabel(config.vergenceMode)}, visual ${formatVisualPresetLabel(config.visualPreset)}.`;
 
   if (!state.monitorWidthConfirmed) {
-    if (state.monitorWidthNeedsReconfirm) {
-      updateStatus(
-        `Reconfirm Monitor Width in Advanced Settings because the display context changed. ${readyText}`,
-        true
-      );
-      return;
-    }
-    updateStatus(
-      `Set and confirm Monitor Width once in Advanced Settings for accurate PD estimation. ${readyText}`,
-      true
-    );
+    updateStatus(`${getMonitorWidthBlockedMessage()} ${readyText}`, true);
     return;
   }
 
@@ -1181,6 +1228,20 @@ function formatExerciseScoresSummaryText() {
   return keys.map(key => `${formatExerciseLabel(key)} ${getExerciseScore(key)}`).join(" | ");
 }
 
+// Scoring deltas are configured in prism diopters; convert to steps so the
+// per-answer change matches the configured PD on any monitor/distance setup.
+function applyPdDelta(pdDelta) {
+  return applyDifficultyDelta(
+    corePdDeltaToDifficultySteps(
+      pdDelta,
+      state.monitorWidthIn,
+      state.viewDistanceIn,
+      getScreenWidthPx(),
+      SPLIT_GAIN_PX_PER_STEP
+    )
+  );
+}
+
 function applyDifficultyDelta(deltaSteps) {
   const beforePd = difficultyToPd(state.difficultySteps, state.monitorWidthIn, state.viewDistanceIn);
   const maxDifficultySteps = pdToDifficultySteps(ABSOLUTE_PD_MAX, state.monitorWidthIn, state.viewDistanceIn);
@@ -1198,12 +1259,13 @@ function pauseSessionForInactivity() {
   state.running = false;
   state.paused = true;
   state.nowTs = performance.now();
+  state.pausedAtTs = state.nowTs;
   stopRoundTicker();
 
   setStartButtonLabel();
   syncSessionLayoutMode();
   beep(720, 160);
-  updateStatus("Auto-paused after 5 minutes without input. Press Resume to continue.", true);
+  updateStatus(`Auto-paused after ${formatInactivityDuration()} without input. Press Resume to continue.`, true);
   updateHud();
   renderScene();
 }
@@ -1216,6 +1278,7 @@ function pauseSessionByUser(message) {
   state.running = false;
   state.paused = true;
   state.nowTs = performance.now();
+  state.pausedAtTs = state.nowTs;
   stopRoundTicker();
 
   setStartButtonLabel();
@@ -1232,7 +1295,10 @@ function resumeSession() {
   state.resumeStartsNextRound = false;
 
   const now = performance.now();
-  const pausedAt = state.nowTs;
+  // Anchor on the pause moment, not state.nowTs: viewport refreshes and debug
+  // hotkeys update nowTs while paused, which would count paused time as elapsed.
+  const pausedAt = state.pausedAtTs > 0 ? state.pausedAtTs : state.nowTs;
+  state.pausedAtTs = 0;
   const sessionRemainingMs = Math.max(0, state.sessionEndTs - pausedAt);
   if (sessionRemainingMs <= 0) {
     state.running = true;
@@ -1596,10 +1662,13 @@ function drawRandomDotStereoSquare(
   const center = getSideCenter(side, squareOffset);
   const rawShiftPerEyeX = showSquare ? squareShift.x : 0;
   const rawShiftPerEyeY = showSquare ? squareShift.y : 0;
-  const maxHorizontalShift = Math.max(0, fieldExtent - (Math.abs(center.x) + squareHalf + TARGET_EDGE_PADDING_PX));
-  const maxVerticalShift = Math.max(0, fieldExtent - (Math.abs(center.y) + squareHalf + TARGET_EDGE_PADDING_PX));
-  const shiftPerEyeX = Math.sign(rawShiftPerEyeX) * Math.min(Math.abs(rawShiftPerEyeX), maxHorizontalShift);
-  const shiftPerEyeY = Math.sign(rawShiftPerEyeY) * Math.min(Math.abs(rawShiftPerEyeY), maxVerticalShift);
+  // Clamp with the worst-case target offset on both axes so the target's
+  // disparity saturates at the same value on every side; a per-side clamp
+  // would make left/right targets pop less than up/down ones at the same
+  // difficulty, biasing responses toward the stronger sides.
+  const maxShiftPerEye = Math.max(0, fieldExtent - (squareOffset + squareHalf + TARGET_EDGE_PADDING_PX));
+  const shiftPerEyeX = Math.sign(rawShiftPerEyeX) * Math.min(Math.abs(rawShiftPerEyeX), maxShiftPerEye);
+  const shiftPerEyeY = Math.sign(rawShiftPerEyeY) * Math.min(Math.abs(rawShiftPerEyeY), maxShiftPerEye);
 
   for (let i = 0; i < dots.length; i += 1) {
     const dot = dots[i];
@@ -1628,7 +1697,9 @@ function drawRandomDotStereoSquare(
       ry = rightEyeCenter.y + center.y + rightLocalY;
     }
     const size = insideSquare ? dot.r + targetPopSizePx : dot.r;
-    context.globalAlpha = insideSquare ? targetPopAlphaScale : 1;
+    // Canvas ignores globalAlpha above 1, so emphasize the target by dimming
+    // the surround instead; a scale of 1 keeps every dot at full alpha.
+    context.globalAlpha = insideSquare ? 1 : 1 / targetPopAlphaScale;
 
     context.fillStyle = LEFT_DOT_COLOR;
     context.fillRect(lx, ly, size, size);
@@ -1731,20 +1802,30 @@ function updateHud() {
   goalPdHudEl.textContent = `${formatPd(state.goalPd)}Δ`;
   roundEl.textContent = String(state.round);
   const trainingActive = isTrainingActive();
+  const clockNowTs = state.paused && state.pausedAtTs > 0 ? state.pausedAtTs : state.nowTs;
 
   let roundTimeLeft = state.roundDurationMs;
   if (trainingActive && state.roundEndTs > 0) {
-    roundTimeLeft = Math.max(0, state.roundEndTs - state.nowTs);
+    roundTimeLeft = Math.max(0, state.roundEndTs - clockNowTs);
   }
   timerEl.textContent = `${(roundTimeLeft / 1000).toFixed(1)}s`;
 
   let sessionLeft = state.sessionDurationMs;
   if (trainingActive && state.sessionEndTs > 0) {
-    sessionLeft = Math.max(0, state.sessionEndTs - state.nowTs);
+    sessionLeft = Math.max(0, state.sessionEndTs - clockNowTs);
   }
   sessionTimerEl.textContent = formatClock(sessionLeft);
   updateSplitReadouts();
   updateDebugStatus();
+}
+
+function formatInactivityDuration() {
+  const totalSeconds = Math.round(INACTIVITY_PAUSE_MS / 1000);
+  if (totalSeconds < 60 || totalSeconds % 60 !== 0) {
+    return `${totalSeconds} seconds`;
+  }
+  const minutes = totalSeconds / 60;
+  return minutes === 1 ? "1 minute" : `${minutes} minutes`;
 }
 
 function formatClock(ms) {
