@@ -15,6 +15,7 @@ Browser-based vergence training prototype using red/cyan anaglyph random-dot ste
 - `python3 -m http.server 4173`
   - Serves the repo locally so the browser smoke harness can load the app over `http://localhost` instead of `file://`.
   - Open `http://localhost:4173/tests/browser-smoke.html` and click `Run Smoke Test`.
+  - Append `?autorun=1` to start the suite automatically (useful for headless runs).
 - `tests/browser-smoke.html`
   - Opens a browser smoke harness that loads the real app and verifies all vergence modes, both field shapes, vertical polarity persistence, debug hotkeys, arrow-key response, timeout transition locking, timeout-transition pause/resume behavior, reset during timeout transition, focus-loss auto-pause, and pause/resume behavior.
   - The harness runs with short test values (`Round Seconds = 5`, `Session Minutes = 1`) so the real timers stay visible but the suite finishes quickly.

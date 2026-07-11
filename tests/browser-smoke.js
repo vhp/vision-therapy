@@ -96,6 +96,10 @@ runBtn.addEventListener("click", () => {
 
 syncEnvironmentGuard();
 
+if (new URLSearchParams(window.location.search).has("autorun") && !getEnvironmentIssue()) {
+  runBtn.click();
+}
+
 function clearResults() {
   resultsEl.replaceChildren();
 }
