@@ -38,6 +38,11 @@ Browser-based vergence training prototype using red/cyan anaglyph random-dot ste
   demand by `PD_GAIN_PER_CORRECT`; any error lowers it by `PD_LOSS_PER_ERROR`.
   This converges near 79% accuracy, so the demand estimate reflects a real
   threshold instead of answer streak luck.
+- `Space` also records a break point at the current demand; the next correct
+  answer in the same exercise records the recovery point. The best
+  break/recovery pair per exercise appears in the session summary, mirroring
+  clinical fusional range measurement. Timeouts do not record breaks since they
+  can reflect inattention rather than fusion loss.
 - Scores are tracked per exercise (for example separate convergence/divergence scores in alternating mode).
 - HUD score is exercise-scoped; alternating sessions show per-exercise score codes (for example `C:3 D:-1`).
 - Session summary is shown at the end.

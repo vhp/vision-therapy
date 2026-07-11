@@ -28,6 +28,9 @@ const {
   getExerciseScore: coreGetExerciseScore,
   clampDifficultySteps: coreClampDifficultySteps,
   advanceStaircase: coreAdvanceStaircase,
+  recordRangeBreak: coreRecordRangeBreak,
+  recordRangeRecovery: coreRecordRangeRecovery,
+  getBestRangePair: coreGetBestRangePair,
   getMmPerPixel: coreGetMmPerPixel,
   splitPxToPd: coreSplitPxToPd,
   pdToSplitPx: corePdToSplitPx,
@@ -202,6 +205,7 @@ const sumBestPdEl = document.getElementById("sumBestPd");
 const sumGoalPdEl = document.getElementById("sumGoalPd");
 const sumScoreEl = document.getElementById("sumScore");
 const sumExerciseScoresEl = document.getElementById("sumExerciseScores");
+const sumRangesEl = document.getElementById("sumRanges");
 const sumRoundsEl = document.getElementById("sumRounds");
 const sumDurationEl = document.getElementById("sumDuration");
 const sumCorrectEl = document.getElementById("sumCorrect");
@@ -246,6 +250,7 @@ if (
   !sumGoalPdEl ||
   !sumScoreEl ||
   !sumExerciseScoresEl ||
+  !sumRangesEl ||
   !sumRoundsEl ||
   !sumDurationEl ||
   !sumCorrectEl ||
@@ -281,6 +286,7 @@ const state = {
   timeoutCount: 0,
   staircaseStreak: 0,
   metricsByExercise: Object.create(null),
+  vergenceRanges: Object.create(null),
   sessionDurationMs: DEFAULT_SESSION_MINUTES * 60_000,
   roundDurationMs: DEFAULT_ROUND_SECONDS * 1000,
   round: 0,
@@ -600,10 +606,12 @@ function onKeyDown(event) {
     state.lastResponseTs = performance.now();
     const skipScore = recordScoringEvent("skip", state.roundVergence);
     state.staircaseStreak = 0;
+    const breakRecorded = coreRecordRangeBreak(state.vergenceRanges, state.roundVergence, state.currentPd);
+    const breakText = breakRecorded ? ` Break recorded at ${formatPd(state.currentPd)}Δ.` : "";
     const pdDelta = applyPdDelta(-PD_LOSS_PER_ERROR);
     setRoundDebugState("skip", "space", state.targetSide, pdDelta);
     playNegativeFeedbackBeep();
-    updateStatus(`Marked unseen (${formatExerciseLabel(skipScore.exerciseKey)}). Score -1. New stereogram.`, true);
+    updateStatus(`Marked unseen (${formatExerciseLabel(skipScore.exerciseKey)}). Score -1.${breakText} New stereogram.`, true);
     updateHud();
     startRound();
     return;
@@ -618,15 +626,19 @@ function onKeyDown(event) {
 
   if (correct) {
     const correctScore = recordScoringEvent("correct", state.roundVergence);
+    const recoveryPair = coreRecordRangeRecovery(state.vergenceRanges, state.roundVergence, state.currentPd);
     const staircase = coreAdvanceStaircase(state.staircaseStreak, "correct", STAIRCASE_CORRECT_PER_STEP_UP);
     state.staircaseStreak = staircase.consecutiveCorrect;
     const pdDelta = staircase.direction > 0 ? applyPdDelta(PD_GAIN_PER_CORRECT) : 0;
     setRoundDebugState("correct", side, state.targetSide, pdDelta);
     playPositiveFeedbackBeep();
 
-    const progressText = staircase.direction > 0
+    let progressText = staircase.direction > 0
       ? `Demand up to ${formatPd(state.currentPd)}Δ.`
       : `Streak ${staircase.consecutiveCorrect}/${STAIRCASE_CORRECT_PER_STEP_UP} at ${formatPd(state.currentPd)}Δ.`;
+    if (recoveryPair) {
+      progressText = `Recovery at ${formatPd(recoveryPair.recoveryPd)}Δ (break ${formatPd(recoveryPair.breakPd)}Δ). ${progressText}`;
+    }
     if (state.bestPd >= state.goalPd) {
       updateStatus(
         `Correct (${side}, ${formatExerciseLabel(correctScore.exerciseKey)}). Score +1. Session target reached at ${formatPd(state.bestPd)}Δ.`
@@ -1120,6 +1132,7 @@ function resetScoringState() {
   state.timeoutCount = 0;
   state.staircaseStreak = 0;
   state.metricsByExercise = Object.create(null);
+  state.vergenceRanges = Object.create(null);
 }
 
 function normalizeExerciseKey(value) {
@@ -1212,6 +1225,15 @@ function formatExerciseScoresSummaryText() {
   const keys = getTrackedExerciseKeys();
   if (keys.length === 0) return "None";
   return keys.map(key => `${formatExerciseLabel(key)} ${getExerciseScore(key)}`).join(" | ");
+}
+
+function formatRangesSummaryText() {
+  const parts = Object.keys(state.vergenceRanges)
+    .map(key => ({ key, pair: coreGetBestRangePair(state.vergenceRanges, key) }))
+    .filter(entry => entry.pair)
+    .sort((a, b) => formatExerciseLabel(a.key).localeCompare(formatExerciseLabel(b.key)))
+    .map(entry => `${formatExerciseShortCode(entry.key)} ${formatPd(entry.pair.breakPd)}/${formatPd(entry.pair.recoveryPd)}Δ`);
+  return parts.length > 0 ? parts.join(" | ") : "-";
 }
 
 // Scoring deltas are configured in prism diopters; convert to steps so the
@@ -1974,6 +1996,7 @@ function showSummaryCard(reachedGoal) {
   sumGoalPdEl.textContent = `${formatPd(state.goalPd)}Δ`;
   sumScoreEl.textContent = String(state.score);
   sumExerciseScoresEl.textContent = formatExerciseScoresSummaryText();
+  sumRangesEl.textContent = formatRangesSummaryText();
   sumRoundsEl.textContent = String(state.round);
   sumDurationEl.textContent = formatClock(state.sessionDurationMs);
   sumCorrectEl.textContent = String(state.correctCount);

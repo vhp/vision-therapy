@@ -190,6 +190,37 @@
     return Math.min(maxSteps, Math.max(0, steps));
   }
 
+  // Break/recovery tracking mirrors clinical fusional range measurement: a
+  // break is the demand where fusion is reported lost, the recovery is the
+  // demand where the next correct response lands for the same exercise.
+  function recordRangeBreak(rangeTracker, exerciseKey, breakPd) {
+    if (!Number.isFinite(breakPd)) return false;
+    const key = normalizeExerciseKey(exerciseKey) || "unassigned";
+    if (!rangeTracker[key]) {
+      rangeTracker[key] = { pendingBreakPd: null, pairs: [] };
+    }
+    if (rangeTracker[key].pendingBreakPd !== null) return false;
+    rangeTracker[key].pendingBreakPd = breakPd;
+    return true;
+  }
+
+  function recordRangeRecovery(rangeTracker, exerciseKey, recoveryPd) {
+    if (!Number.isFinite(recoveryPd)) return null;
+    const key = normalizeExerciseKey(exerciseKey) || "unassigned";
+    const entry = rangeTracker[key];
+    if (!entry || entry.pendingBreakPd === null) return null;
+    const pair = { breakPd: entry.pendingBreakPd, recoveryPd };
+    entry.pairs.push(pair);
+    entry.pendingBreakPd = null;
+    return pair;
+  }
+
+  function getBestRangePair(rangeTracker, exerciseKey) {
+    const entry = rangeTracker[normalizeExerciseKey(exerciseKey) || "unassigned"];
+    if (!entry || entry.pairs.length === 0) return null;
+    return entry.pairs.reduce((best, pair) => (pair.breakPd > best.breakPd ? pair : best));
+  }
+
   // N-down/1-up transformed staircase; with N=3 accuracy converges near 79%.
   function advanceStaircase(consecutiveCorrect, outcomeType, correctPerStepUp) {
     const required = Math.max(1, Math.trunc(correctPerStepUp) || 1);
@@ -307,6 +338,9 @@
     getExerciseScore,
     clampDifficultySteps,
     advanceStaircase,
+    recordRangeBreak,
+    recordRangeRecovery,
+    getBestRangePair,
     getMmPerPixel,
     splitPxToPd,
     pdToSplitPx,
