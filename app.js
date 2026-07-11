@@ -27,6 +27,7 @@ const {
   recordScoringEvent: coreRecordScoringEvent,
   getExerciseScore: coreGetExerciseScore,
   clampDifficultySteps: coreClampDifficultySteps,
+  advanceStaircase: coreAdvanceStaircase,
   getMmPerPixel: coreGetMmPerPixel,
   splitPxToPd: coreSplitPxToPd,
   pdToSplitPx: corePdToSplitPx,
@@ -46,6 +47,7 @@ const {
   TICK_MS,
   PD_GAIN_PER_CORRECT,
   PD_LOSS_PER_ERROR = 1,
+  STAIRCASE_CORRECT_PER_STEP_UP = 3,
   INACTIVITY_PAUSE_MS,
   NEXT_ROUND_DELAY_MS,
   CONFIG_STORAGE_KEY,
@@ -277,6 +279,7 @@ const state = {
   wrongCount: 0,
   skipCount: 0,
   timeoutCount: 0,
+  staircaseStreak: 0,
   metricsByExercise: Object.create(null),
   sessionDurationMs: DEFAULT_SESSION_MINUTES * 60_000,
   roundDurationMs: DEFAULT_ROUND_SECONDS * 1000,
@@ -555,6 +558,7 @@ function handleRoundTimeout() {
   stopRoundTicker();
 
   const timeoutScore = recordScoringEvent("timeout", state.roundVergence);
+  state.staircaseStreak = 0;
   const pdDelta = applyPdDelta(-PD_LOSS_PER_ERROR);
   setRoundDebugState("timeout", "-", state.targetSide, pdDelta);
   playNegativeFeedbackBeep();
@@ -595,6 +599,7 @@ function onKeyDown(event) {
     event.preventDefault();
     state.lastResponseTs = performance.now();
     const skipScore = recordScoringEvent("skip", state.roundVergence);
+    state.staircaseStreak = 0;
     const pdDelta = applyPdDelta(-PD_LOSS_PER_ERROR);
     setRoundDebugState("skip", "space", state.targetSide, pdDelta);
     playNegativeFeedbackBeep();
@@ -613,21 +618,27 @@ function onKeyDown(event) {
 
   if (correct) {
     const correctScore = recordScoringEvent("correct", state.roundVergence);
-    const pdDelta = applyPdDelta(PD_GAIN_PER_CORRECT);
+    const staircase = coreAdvanceStaircase(state.staircaseStreak, "correct", STAIRCASE_CORRECT_PER_STEP_UP);
+    state.staircaseStreak = staircase.consecutiveCorrect;
+    const pdDelta = staircase.direction > 0 ? applyPdDelta(PD_GAIN_PER_CORRECT) : 0;
     setRoundDebugState("correct", side, state.targetSide, pdDelta);
     playPositiveFeedbackBeep();
 
+    const progressText = staircase.direction > 0
+      ? `Demand up to ${formatPd(state.currentPd)}Δ.`
+      : `Streak ${staircase.consecutiveCorrect}/${STAIRCASE_CORRECT_PER_STEP_UP} at ${formatPd(state.currentPd)}Δ.`;
     if (state.bestPd >= state.goalPd) {
       updateStatus(
         `Correct (${side}, ${formatExerciseLabel(correctScore.exerciseKey)}). Score +1. Session target reached at ${formatPd(state.bestPd)}Δ.`
       );
     } else {
       updateStatus(
-        `Correct (${side}, ${formatExerciseLabel(correctScore.exerciseKey)}). Score +1. Current ${formatPd(state.currentPd)}Δ.`
+        `Correct (${side}, ${formatExerciseLabel(correctScore.exerciseKey)}). Score +1. ${progressText}`
       );
     }
   } else {
     const wrongScore = recordScoringEvent("wrong", state.roundVergence);
+    state.staircaseStreak = 0;
     const pdDelta = applyPdDelta(-PD_LOSS_PER_ERROR);
     setRoundDebugState("wrong", side, state.targetSide, pdDelta);
     playNegativeFeedbackBeep();
@@ -1107,6 +1118,7 @@ function resetScoringState() {
   state.wrongCount = 0;
   state.skipCount = 0;
   state.timeoutCount = 0;
+  state.staircaseStreak = 0;
   state.metricsByExercise = Object.create(null);
 }
 
@@ -2001,6 +2013,7 @@ function updateDebugStatus() {
     `event=${state.lastRoundEvent}`,
     `input=${state.lastInputSide}`,
     `target=${state.lastTargetSide}`,
+    `streak=${state.staircaseStreak}/${STAIRCASE_CORRECT_PER_STEP_UP}`,
     `delta=${deltaText}`,
     `scores=${formatScoreHudText()}`,
     `total=${state.score}`,

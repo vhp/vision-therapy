@@ -34,6 +34,10 @@ Browser-based vergence training prototype using red/cyan anaglyph random-dot ste
 - `Esc` exits fullscreen and pauses.
 - Leaving the tab/window auto-pauses the session so timing does not keep running in the background.
 - Scoring: correct = `+1`; wrong / timeout / space = `-1`.
+- Demand follows a 3-down/1-up staircase: three consecutive correct answers raise
+  demand by `PD_GAIN_PER_CORRECT`; any error lowers it by `PD_LOSS_PER_ERROR`.
+  This converges near 79% accuracy, so the demand estimate reflects a real
+  threshold instead of answer streak luck.
 - Scores are tracked per exercise (for example separate convergence/divergence scores in alternating mode).
 - HUD score is exercise-scoped; alternating sessions show per-exercise score codes (for example `C:3 D:-1`).
 - Session summary is shown at the end.

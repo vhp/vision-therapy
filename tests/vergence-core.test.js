@@ -129,6 +129,23 @@ test("scoring events accumulate per-exercise metrics", () => {
   assert.equal(metrics.convergence.score, 1);
 });
 
+test("staircase steps up after N consecutive correct and resets on error", () => {
+  let state = core.advanceStaircase(0, "correct", 3);
+  assert.deepEqual(state, { consecutiveCorrect: 1, direction: 0 });
+  state = core.advanceStaircase(state.consecutiveCorrect, "correct", 3);
+  assert.deepEqual(state, { consecutiveCorrect: 2, direction: 0 });
+  state = core.advanceStaircase(state.consecutiveCorrect, "correct", 3);
+  assert.deepEqual(state, { consecutiveCorrect: 0, direction: 1 });
+
+  assert.deepEqual(core.advanceStaircase(2, "wrong", 3), { consecutiveCorrect: 0, direction: -1 });
+  assert.deepEqual(core.advanceStaircase(1, "timeout", 3), { consecutiveCorrect: 0, direction: -1 });
+  assert.deepEqual(core.advanceStaircase(0, "skip", 3), { consecutiveCorrect: 0, direction: -1 });
+
+  assert.deepEqual(core.advanceStaircase(0, "correct", 1), { consecutiveCorrect: 0, direction: 1 });
+  assert.deepEqual(core.advanceStaircase(5, "correct", 0), { consecutiveCorrect: 0, direction: 1 });
+  assert.deepEqual(core.advanceStaircase(Number.NaN, "correct", 3), { consecutiveCorrect: 1, direction: 0 });
+});
+
 test("difficulty steps clamp to the allowed range", () => {
   assert.equal(core.clampDifficultySteps(-2, 50), 0);
   assert.equal(core.clampDifficultySteps(12.5, 50), 12.5);

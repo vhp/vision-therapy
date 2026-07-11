@@ -190,6 +190,19 @@
     return Math.min(maxSteps, Math.max(0, steps));
   }
 
+  // N-down/1-up transformed staircase; with N=3 accuracy converges near 79%.
+  function advanceStaircase(consecutiveCorrect, outcomeType, correctPerStepUp) {
+    const required = Math.max(1, Math.trunc(correctPerStepUp) || 1);
+    if (outcomeType === "correct") {
+      const streak = (Number.isFinite(consecutiveCorrect) ? Math.max(0, consecutiveCorrect) : 0) + 1;
+      if (streak >= required) {
+        return { consecutiveCorrect: 0, direction: 1 };
+      }
+      return { consecutiveCorrect: streak, direction: 0 };
+    }
+    return { consecutiveCorrect: 0, direction: -1 };
+  }
+
   function pdDeltaToDifficultySteps(
     pdDelta,
     monitorWidthIn,
@@ -293,6 +306,7 @@
     recordScoringEvent,
     getExerciseScore,
     clampDifficultySteps,
+    advanceStaircase,
     getMmPerPixel,
     splitPxToPd,
     pdToSplitPx,
