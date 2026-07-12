@@ -59,6 +59,9 @@
     if (normalized === "alternate" || normalized === "facility") {
       return round % 2 === 0 ? "divergence" : "convergence";
     }
+    if (normalized === "smooth") {
+      return "convergence";
+    }
     if (normalized === "random_jump") {
       return resolveRandomJumpVergence(round, sequenceSeed);
     }

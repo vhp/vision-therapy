@@ -102,6 +102,12 @@ When paused (for example after `Esc`):
     `FACILITY_BASE_OUT_PD` in config.js). The pair advances only on correct
     answers and demand never drifts. Scored in cycles per minute like the
     clinical prism-flipper facility test; the adult norm is about 15 cpm.
+  - `Smooth Vergence (Ramp)`: convergence demand rises slowly and continuously
+    (`SMOOTH_RAMP_PD_PER_SEC` in config.js) while you keep the target fused,
+    rather than stepping on each answer. Press `Space` when it splits; the
+    demand drops back a margin (`SMOOTH_BREAK_DROP_PD`) so you can re-fuse and
+    climb again. Trains smooth (tonic) vergence, the slow-pursuit counterpart
+    to the jump modes.
   - `Vergence Up` / `Vergence Down`: vertical demand, where one eye's image
     sits higher or lower than the other. Doctor-directed only.
 - Mode labels in this project are generic clinical/task labels rather than references to any outside product naming.

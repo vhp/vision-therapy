@@ -54,6 +54,8 @@ const {
   STAIRCASE_CORRECT_PER_STEP_UP = 3,
   FACILITY_BASE_IN_PD = 3,
   FACILITY_BASE_OUT_PD = 12,
+  SMOOTH_RAMP_PD_PER_SEC = 0.4,
+  SMOOTH_BREAK_DROP_PD = 8,
   INACTIVITY_PAUSE_MS,
   NEXT_ROUND_DELAY_MS,
   CONFIG_STORAGE_KEY,
@@ -99,6 +101,7 @@ const FALLBACK_VERGENCE_MODES = Object.freeze([
   { value: "alternate", label: "Jump Vergence (Alternating)" },
   { value: "random_jump", label: "Jump Vergence (Random)" },
   { value: "facility", label: "Vergence Facility (3Δ / 12Δ)" },
+  { value: "smooth", label: "Smooth Vergence (Ramp)" },
   { value: "vergence_up", label: "Vergence Up" },
   { value: "vergence_down", label: "Vergence Down" }
 ]);
@@ -128,6 +131,7 @@ const VERGENCE_MODE_DESCRIPTIONS = Object.freeze({
   alternate: "Switches between convergence and divergence every round.",
   random_jump: "Random mix of convergence and divergence rounds, so you cannot anticipate the direction.",
   facility: "Jumps between a fixed easy divergence and hard convergence pair. Trains switching speed, scored in cycles per minute.",
+  smooth: "Convergence demand climbs slowly and continuously while you hold the target fused. Press Space the moment it splits.",
   vergence_up: "One eye's image sits higher than the other. Only train this if a doctor asked you to.",
   vergence_down: "One eye's image sits lower than the other. Only train this if a doctor asked you to."
 });
@@ -692,6 +696,9 @@ function startRoundTicker() {
       return;
     }
 
+    if (isSmoothMode()) {
+      applySmoothRampTick();
+    }
     updateHud();
   }, TICK_MS);
 }
@@ -703,7 +710,7 @@ function handleRoundTimeout() {
 
   const timeoutScore = recordScoringEvent("timeout", state.roundVergence);
   state.staircaseStreak = 0;
-  const pdDelta = isFacilityMode() ? 0 : applyPdDelta(-PD_LOSS_PER_ERROR);
+  const pdDelta = applyErrorDemandDrop();
   setRoundDebugState("timeout", "-", state.targetSide, pdDelta);
   playNegativeFeedbackBeep();
   updateStatus(`Round timeout (${formatExerciseLabel(timeoutScore.exerciseKey)}). Score -1.`, true);
@@ -744,7 +751,7 @@ function onKeyDown(event) {
     state.lastResponseTs = performance.now();
     const suppressionScore = recordScoringEvent("suppression", state.roundVergence);
     state.staircaseStreak = 0;
-    const pdDelta = isFacilityMode() ? 0 : applyPdDelta(-PD_LOSS_PER_ERROR);
+    const pdDelta = applyErrorDemandDrop();
     setRoundDebugState("suppression", "s", state.targetSide, pdDelta);
     playNegativeFeedbackBeep();
     const demandText = isFacilityMode() ? "Demand held at the fixed pair." : "Demand reduced.";
@@ -764,7 +771,7 @@ function onKeyDown(event) {
     state.staircaseStreak = 0;
     const breakRecorded = coreRecordRangeBreak(state.vergenceRanges, state.roundVergence, state.currentPd);
     const breakText = breakRecorded ? ` Break recorded at ${formatPd(state.currentPd)}Δ.` : "";
-    const pdDelta = isFacilityMode() ? 0 : applyPdDelta(-PD_LOSS_PER_ERROR);
+    const pdDelta = applyErrorDemandDrop();
     setRoundDebugState("skip", "space", state.targetSide, pdDelta);
     playNegativeFeedbackBeep();
     updateStatus(`Marked unseen (${formatExerciseLabel(skipScore.exerciseKey)}). Score -1.${breakText} New stereogram.`, true);
@@ -791,6 +798,10 @@ function onKeyDown(event) {
     if (isFacilityMode()) {
       state.facilityPhase += 1;
       progressText = `Cycles ${getFacilityCycles()} (${getFacilityCpm().toFixed(1)} cpm).`;
+    } else if (isSmoothMode()) {
+      // The ramp owns the demand; a correct answer just confirms fusion and
+      // refreshes the target while demand keeps climbing.
+      progressText = `Fused at ${formatPd(state.currentPd)}Δ. Demand rising.`;
     } else {
       const staircase = coreAdvanceStaircase(state.staircaseStreak, "correct", STAIRCASE_CORRECT_PER_STEP_UP);
       state.staircaseStreak = staircase.consecutiveCorrect;
@@ -817,7 +828,7 @@ function onKeyDown(event) {
   } else {
     const wrongScore = recordScoringEvent("wrong", state.roundVergence);
     state.staircaseStreak = 0;
-    const pdDelta = isFacilityMode() ? 0 : applyPdDelta(-PD_LOSS_PER_ERROR);
+    const pdDelta = applyErrorDemandDrop();
     setRoundDebugState("wrong", side, state.targetSide, pdDelta);
     playNegativeFeedbackBeep();
     updateStatus(`Wrong (${side}, ${formatExerciseLabel(wrongScore.exerciseKey)}). Score -1.`, true);
@@ -1426,6 +1437,9 @@ function getExpectedExerciseKeysForMode(mode, sampleRounds = 24) {
   if (normalizedMode === "alternate" || normalizedMode === "random_jump" || normalizedMode === "facility") {
     return ["convergence", "divergence"];
   }
+  if (normalizedMode === "smooth") {
+    return ["convergence"];
+  }
   const keys = new Set();
   for (let round = 1; round <= sampleRounds; round += 1) {
     const resolved = normalizeExerciseKey(resolveRoundVergence(mode, round));
@@ -1506,8 +1520,38 @@ function isFacilityMode() {
   return normalizeVergenceMode(state.vergenceMode) === "facility";
 }
 
+function isSmoothMode() {
+  return normalizeVergenceMode(state.vergenceMode) === "smooth";
+}
+
 function getFacilityDemandPd(roundVergence) {
   return roundVergence === "divergence" ? FACILITY_BASE_IN_PD : FACILITY_BASE_OUT_PD;
+}
+
+// Demand change on any miss. Facility holds its fixed pair; smooth drops back a
+// wide margin so fusion can recover before the ramp climbs again; the staircase
+// modes step down one loss.
+function applyErrorDemandDrop() {
+  if (isFacilityMode()) return 0;
+  if (isSmoothMode()) return applyPdDelta(-SMOOTH_BREAK_DROP_PD);
+  return applyPdDelta(-PD_LOSS_PER_ERROR);
+}
+
+// One tick of the smooth ramp: nudge demand up a slice of the per-second rate
+// and redraw so the field visibly separates. Best PD is not touched here; it
+// only moves when the user confirms fusion with a correct answer.
+function applySmoothRampTick() {
+  const rampSteps = corePdDeltaToDifficultySteps(
+    SMOOTH_RAMP_PD_PER_SEC * (TICK_MS / 1000),
+    state.monitorWidthIn,
+    state.viewDistanceIn,
+    getScreenWidthPx(),
+    SPLIT_GAIN_PX_PER_STEP
+  );
+  const maxDifficultySteps = pdToDifficultySteps(ABSOLUTE_PD_MAX, state.monitorWidthIn, state.viewDistanceIn);
+  state.difficultySteps = coreClampDifficultySteps(state.difficultySteps + rampSteps, maxDifficultySteps);
+  state.currentPd = difficultyToPd(state.difficultySteps, state.monitorWidthIn, state.viewDistanceIn);
+  renderScene();
 }
 
 function getFacilityCycles() {
@@ -1713,7 +1757,7 @@ function updateVergenceModeDescription() {
 }
 
 function getVergenceModeGroupLabel(modeValue) {
-  if (modeValue === "convergence" || modeValue === "divergence") {
+  if (modeValue === "convergence" || modeValue === "divergence" || modeValue === "smooth") {
     return "Horizontal Basics";
   }
   if (modeValue === "alternate" || modeValue === "random_jump" || modeValue === "facility") {

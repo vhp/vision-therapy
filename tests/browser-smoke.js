@@ -79,6 +79,16 @@ const MODE_SCENARIOS = [
     suppressionDemandText: "Demand held"
   },
   {
+    label: "Smooth Vergence (Ramp)",
+    vergenceMode: "smooth",
+    fieldShape: "square",
+    verticalPolarity: "standard",
+    expectedInitialExercises: ["Convergence"],
+    expectedNextExercises: ["Convergence"],
+    expectedAxis: "H",
+    verifySmoothRamp: true
+  },
+  {
     label: "Vergence Up / Square",
     vergenceMode: "vergence_up",
     fieldShape: "square",
@@ -583,6 +593,14 @@ async function verifyResizeDuringPause(frameWindow, frameDocument, startBtn) {
   }
 }
 
+async function verifySmoothRamp(frameDocument) {
+  const prismEl = frameDocument.getElementById("prism");
+  const readPd = () => Number.parseFloat(String(prismEl.textContent || "").replace(/[^\d.]/g, ""));
+  const before = readPd();
+  // With no answers at all, the demand must climb on its own from the ramp.
+  await waitFor("smooth demand ramps up", () => readPd() > before + 0.3, 5000);
+}
+
 async function verifySuppressionMessage(frameWindow, frameDocument, expectedFragment) {
   const statusEl = frameDocument.getElementById("status");
   dispatchKey(frameWindow, "KeyS", "s");
@@ -821,6 +839,11 @@ async function runModeScenario(scenario) {
     throw new Error(`${scenario.label}: expected Eye Split axis ${scenario.expectedAxis}`);
   }
   recordResult("pass", `${scenario.label}: initial exercise and axis verified`);
+
+  if (scenario.verifySmoothRamp) {
+    await verifySmoothRamp(frameDocument);
+    recordResult("pass", `${scenario.label}: demand ramps continuously`);
+  }
 
   if (scenario.verifyDebugHotkeys) {
     await verifyDebugHotkeys(frameWindow, frameDocument, debugStatusEl);
