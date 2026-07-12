@@ -649,7 +649,6 @@ function startRound() {
       state.viewDistanceIn
     );
     state.currentPd = difficultyToPd(state.difficultySteps, state.monitorWidthIn, state.viewDistanceIn);
-    state.bestPd = Math.max(state.bestPd, state.currentPd);
   }
   state.targetSide = SIDES[(Math.random() * SIDES.length) | 0];
   state.roundSeed = ((Math.random() * 0xffffffff) | 0) >>> 0;
@@ -774,6 +773,9 @@ function onKeyDown(event) {
   const correct = side === state.targetSide;
 
   if (correct) {
+    // Best PD is a high-water mark of demand actually fused, so it only moves
+    // here, on a correct answer, at the demand of the round just cleared.
+    state.bestPd = Math.max(state.bestPd, state.currentPd);
     const correctScore = recordScoringEvent("correct", state.roundVergence);
     const recoveryPair = coreRecordRangeRecovery(state.vergenceRanges, state.roundVergence, state.currentPd);
     let pdDelta = 0;
@@ -1534,7 +1536,6 @@ function applyDifficultyDelta(deltaSteps) {
   const maxDifficultySteps = pdToDifficultySteps(ABSOLUTE_PD_MAX, state.monitorWidthIn, state.viewDistanceIn);
   state.difficultySteps = coreClampDifficultySteps(state.difficultySteps + deltaSteps, maxDifficultySteps);
   state.currentPd = difficultyToPd(state.difficultySteps, state.monitorWidthIn, state.viewDistanceIn);
-  state.bestPd = Math.max(state.bestPd, state.currentPd);
   return state.currentPd - beforePd;
 }
 
