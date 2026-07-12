@@ -523,6 +523,60 @@ body.session-active .history-card {
   color: var(--muted);
 }
 
+.history-trend-wrap {
+  position: relative;
+  margin-bottom: 12px;
+}
+
+#historyTrend {
+  display: block;
+  width: 100%;
+  height: 160px;
+}
+
+.trend-legend {
+  display: flex;
+  gap: 14px;
+  margin-bottom: 6px;
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+
+.trend-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.trend-swatch {
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+}
+
+.trend-swatch-best {
+  background: #28a878;
+}
+
+.trend-swatch-break {
+  background: #5b8ae6;
+}
+
+.trend-tooltip {
+  position: absolute;
+  top: 8px;
+  padding: 6px 9px;
+  border-radius: 8px;
+  border: 1px solid #333;
+  background: #1c1c1c;
+  color: var(--text);
+  font-size: 0.75rem;
+  line-height: 1.4;
+  pointer-events: none;
+  white-space: nowrap;
+  z-index: 2;
+}
+
 @media (max-width: 920px) {
   .layout {
     grid-template-columns: 1fr;

@@ -236,6 +236,19 @@
         <button id="historyClearBtn" type="button" class="ghost">Clear History</button>
       </div>
       <p id="historyEmpty">No sessions recorded yet. Finish a session to start the log.</p>
+      <div id="historyTrendWrap" class="history-trend-wrap" hidden>
+        <div class="trend-legend">
+          <span class="trend-legend-item"><i class="trend-swatch trend-swatch-best"></i>Best PD</span>
+          <span class="trend-legend-item"><i class="trend-swatch trend-swatch-break"></i>Break point</span>
+        </div>
+        <canvas
+          id="historyTrend"
+          height="160"
+          role="img"
+          aria-label="Best PD and break point per session over time"
+        ></canvas>
+        <div id="historyTrendTooltip" class="trend-tooltip" hidden></div>
+      </div>
       <div class="history-table-wrap">
         <table id="historyTable" hidden>
           <thead>

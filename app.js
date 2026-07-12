@@ -224,6 +224,9 @@ const historyCardEl = document.getElementById("historyCard");
 const historyEmptyEl = document.getElementById("historyEmpty");
 const historyTableEl = document.getElementById("historyTable");
 const historyTableBodyEl = document.getElementById("historyTableBody");
+const historyTrendWrapEl = document.getElementById("historyTrendWrap");
+const historyTrendEl = document.getElementById("historyTrend");
+const historyTrendTooltipEl = document.getElementById("historyTrendTooltip");
 const historyExportJsonBtn = document.getElementById("historyExportJsonBtn");
 const historyExportCsvBtn = document.getElementById("historyExportCsvBtn");
 const historyClearBtn = document.getElementById("historyClearBtn");
@@ -282,6 +285,9 @@ if (
   !historyEmptyEl ||
   !historyTableEl ||
   !historyTableBodyEl ||
+  !historyTrendWrapEl ||
+  !historyTrendEl ||
+  !historyTrendTooltipEl ||
   !historyExportJsonBtn ||
   !historyExportCsvBtn ||
   !historyClearBtn
@@ -345,6 +351,15 @@ let audioCtx = null;
 let wasFullscreenActive = isFullscreenActive();
 let viewportRefreshFrameId = null;
 
+// Trend chart palette validated for CVD separation and contrast on #121212.
+const TREND_SERIES = Object.freeze([
+  { key: "bestPd", label: "Best PD", color: "#28a878" },
+  { key: "breakPd", label: "Break point", color: "#5b8ae6" }
+]);
+const TREND_MAX_SESSIONS = 60;
+const TREND_MARGIN = Object.freeze({ top: 8, right: 12, bottom: 20, left: 40 });
+let trendModel = null;
+
 let startInFlight = false;
 
 startBtn.addEventListener("click", async () => {
@@ -395,6 +410,8 @@ if (debugDownBtn) {
 if (debugUpBtn) {
   debugUpBtn.addEventListener("click", () => applyDebugDifficultyAdjustment(1, "button"));
 }
+historyTrendEl.addEventListener("mousemove", onTrendHover);
+historyTrendEl.addEventListener("mouseleave", onTrendHoverEnd);
 historyExportJsonBtn.addEventListener("click", exportSessionHistoryJson);
 historyExportCsvBtn.addEventListener("click", exportSessionHistoryCsv);
 historyClearBtn.addEventListener("click", clearSessionHistoryWithConfirm);
@@ -535,6 +552,7 @@ function refreshViewport() {
   state.dots = buildDotField(getCurrentDotCount(), getFieldExtent(), state.roundSeed || 1001, state.visualTuning);
   updateHud();
   renderScene();
+  renderSessionTrend();
 }
 
 function getCurrentDotCount() {
@@ -2231,6 +2249,175 @@ function renderSessionHistory() {
     }
     historyTableBodyEl.append(row);
   }
+
+  renderSessionTrend();
+}
+
+function getTrendData() {
+  return readSessionHistory()
+    .slice(-TREND_MAX_SESSIONS)
+    .map(record => {
+      const bestRange = getRecordBestRange(record);
+      return {
+        endedAt: record.endedAt,
+        bestPd: Number.isFinite(record.bestPd) ? record.bestPd : null,
+        breakPd: bestRange ? bestRange.breakPd : null
+      };
+    });
+}
+
+function pickTrendTickStep(maxValue) {
+  for (const step of [1, 2, 5, 10, 20, 25, 50, 100]) {
+    if (maxValue / step <= 5) return step;
+  }
+  return 200;
+}
+
+function renderSessionTrend(hoverIndex = null) {
+  const data = getTrendData();
+  if (data.length < 2) {
+    historyTrendWrapEl.hidden = true;
+    trendModel = null;
+    return;
+  }
+  historyTrendWrapEl.hidden = false;
+
+  const cssWidth = historyTrendEl.clientWidth;
+  const cssHeight = 160;
+  if (cssWidth <= 0) return;
+
+  const dpr = window.devicePixelRatio || 1;
+  if (historyTrendEl.width !== Math.round(cssWidth * dpr) || historyTrendEl.height !== Math.round(cssHeight * dpr)) {
+    historyTrendEl.width = Math.round(cssWidth * dpr);
+    historyTrendEl.height = Math.round(cssHeight * dpr);
+  }
+  const trendCtx = historyTrendEl.getContext("2d");
+  if (!trendCtx) return;
+  trendCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  trendCtx.clearRect(0, 0, cssWidth, cssHeight);
+
+  const plotLeft = TREND_MARGIN.left;
+  const plotRight = cssWidth - TREND_MARGIN.right;
+  const plotTop = TREND_MARGIN.top;
+  const plotBottom = cssHeight - TREND_MARGIN.bottom;
+  const plotWidth = plotRight - plotLeft;
+  const plotHeight = plotBottom - plotTop;
+
+  const values = data.flatMap(point => [point.bestPd, point.breakPd]).filter(Number.isFinite);
+  const rawMax = Math.max(5, ...values);
+  const tickStep = pickTrendTickStep(rawMax);
+  const yMax = Math.ceil(rawMax / tickStep) * tickStep;
+  const xFor = index => plotLeft + (data.length === 1 ? 0 : (index / (data.length - 1)) * plotWidth);
+  const yFor = value => plotBottom - (value / yMax) * plotHeight;
+
+  trendCtx.strokeStyle = "#242424";
+  trendCtx.fillStyle = "#8d8d8d";
+  trendCtx.lineWidth = 1;
+  trendCtx.font = "10px system-ui, sans-serif";
+  trendCtx.textAlign = "right";
+  trendCtx.textBaseline = "middle";
+  for (let tick = 0; tick <= yMax; tick += tickStep) {
+    const y = yFor(tick);
+    trendCtx.beginPath();
+    trendCtx.moveTo(plotLeft, y);
+    trendCtx.lineTo(plotRight, y);
+    trendCtx.stroke();
+    trendCtx.fillText(`${tick}Δ`, plotLeft - 6, y);
+  }
+
+  trendCtx.textBaseline = "top";
+  trendCtx.textAlign = "left";
+  trendCtx.fillText(formatHistoryDate(data[0].endedAt).split(",")[0], plotLeft, plotBottom + 6);
+  trendCtx.textAlign = "right";
+  trendCtx.fillText(formatHistoryDate(data[data.length - 1].endedAt).split(",")[0], plotRight, plotBottom + 6);
+
+  if (hoverIndex !== null && data[hoverIndex]) {
+    trendCtx.strokeStyle = "#454545";
+    trendCtx.beginPath();
+    trendCtx.moveTo(xFor(hoverIndex), plotTop);
+    trendCtx.lineTo(xFor(hoverIndex), plotBottom);
+    trendCtx.stroke();
+  }
+
+  const drawPoints = data.length <= 40;
+  for (const series of TREND_SERIES) {
+    trendCtx.strokeStyle = series.color;
+    trendCtx.lineWidth = 2;
+    trendCtx.beginPath();
+    let segmentOpen = false;
+    for (let i = 0; i < data.length; i += 1) {
+      const value = data[i][series.key];
+      if (!Number.isFinite(value)) {
+        segmentOpen = false;
+        continue;
+      }
+      if (segmentOpen) {
+        trendCtx.lineTo(xFor(i), yFor(value));
+      } else {
+        trendCtx.moveTo(xFor(i), yFor(value));
+        segmentOpen = true;
+      }
+    }
+    trendCtx.stroke();
+
+    if (drawPoints || hoverIndex !== null) {
+      for (let i = 0; i < data.length; i += 1) {
+        const value = data[i][series.key];
+        if (!Number.isFinite(value)) continue;
+        if (!drawPoints && i !== hoverIndex) continue;
+        const highlighted = i === hoverIndex;
+        trendCtx.beginPath();
+        trendCtx.arc(xFor(i), yFor(value), highlighted ? 4.5 : 3, 0, Math.PI * 2);
+        trendCtx.fillStyle = series.color;
+        trendCtx.fill();
+        trendCtx.strokeStyle = "#121212";
+        trendCtx.lineWidth = 2;
+        trendCtx.stroke();
+      }
+    }
+  }
+
+  trendModel = { data, xFor, plotLeft, plotRight };
+}
+
+function onTrendHover(event) {
+  if (!trendModel || trendModel.data.length === 0) return;
+  const rect = historyTrendEl.getBoundingClientRect();
+  const x = event.clientX - rect.left;
+  const { data, xFor, plotLeft, plotRight } = trendModel;
+
+  let nearestIndex = 0;
+  let nearestDistance = Infinity;
+  for (let i = 0; i < data.length; i += 1) {
+    const distance = Math.abs(xFor(i) - x);
+    if (distance < nearestDistance) {
+      nearestDistance = distance;
+      nearestIndex = i;
+    }
+  }
+
+  renderSessionTrend(nearestIndex);
+
+  const point = data[nearestIndex];
+  historyTrendTooltipEl.replaceChildren();
+  const lines = [formatHistoryDate(point.endedAt)];
+  if (Number.isFinite(point.bestPd)) lines.push(`Best PD: ${formatPd(point.bestPd)}Δ`);
+  if (Number.isFinite(point.breakPd)) lines.push(`Break: ${formatPd(point.breakPd)}Δ`);
+  for (const text of lines) {
+    const line = document.createElement("div");
+    line.textContent = text;
+    historyTrendTooltipEl.append(line);
+  }
+  historyTrendTooltipEl.hidden = false;
+  const tooltipWidth = historyTrendTooltipEl.offsetWidth || 120;
+  const anchorX = xFor(nearestIndex);
+  const flip = anchorX + 12 + tooltipWidth > plotRight;
+  historyTrendTooltipEl.style.left = `${flip ? Math.max(plotLeft, anchorX - 12 - tooltipWidth) : anchorX + 12}px`;
+}
+
+function onTrendHoverEnd() {
+  historyTrendTooltipEl.hidden = true;
+  renderSessionTrend();
 }
 
 function downloadTextFile(filename, mimeType, content) {
