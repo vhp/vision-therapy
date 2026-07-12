@@ -2363,6 +2363,7 @@ function buildSessionHistoryRecord(reachedGoal) {
 
   return {
     endedAt: new Date().toISOString(),
+    debug: DEBUG_MODE,
     mode: normalizeVergenceMode(state.vergenceMode),
     visualPreset: state.visualPreset,
     fieldSize: normalizeFieldSize(state.fieldSize),
@@ -2461,7 +2462,7 @@ function renderSessionHistory() {
     const bestRange = getRecordBestRange(record);
     const cells = [
       formatHistoryDate(record.endedAt),
-      formatVergenceLabel(record.mode),
+      record.debug === true ? `${formatVergenceLabel(record.mode)} (debug)` : formatVergenceLabel(record.mode),
       sanitizeRecordPd(record.bestPd) !== null ? `${formatPd(sanitizeRecordPd(record.bestPd))}Δ` : "-",
       bestRange ? `${formatPd(bestRange.breakPd)}/${formatPd(bestRange.recoveryPd)}Δ` : "-",
       String(record.totalScore ?? "-"),
@@ -2480,7 +2481,10 @@ function renderSessionHistory() {
 }
 
 function getTrendData() {
+  // Debug sessions can start at an arbitrary demand, so keep them out of the
+  // progress trend; they still appear in the table (marked) and exports.
   return readSessionHistory()
+    .filter(record => record.debug !== true)
     .slice(-TREND_MAX_SESSIONS)
     .map(record => {
       const bestRange = getRecordBestRange(record);
@@ -2669,7 +2673,7 @@ function exportSessionHistoryCsv() {
   if (history.length === 0) return;
 
   const header = [
-    "endedAt", "mode", "visualPreset", "fieldSize", "redLensSide", "sessionMinutes", "goalPd", "bestPd", "reachedGoal",
+    "endedAt", "debug", "mode", "visualPreset", "fieldSize", "redLensSide", "sessionMinutes", "goalPd", "bestPd", "reachedGoal",
     "totalScore", "rounds", "correct", "wrong", "timeouts", "skips", "suppressions",
     "bestBreakPd", "bestRecoveryPd", "facilityCycles", "facilityCpm"
   ];
@@ -2678,6 +2682,7 @@ function exportSessionHistoryCsv() {
     const bestRange = getRecordBestRange(record);
     lines.push([
       record.endedAt ?? "",
+      record.debug === true ? "true" : "false",
       record.mode ?? "",
       record.visualPreset ?? "",
       record.fieldSize ?? "",

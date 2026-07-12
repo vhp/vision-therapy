@@ -581,19 +581,8 @@ async function verifyCorruptHistoryBoots() {
     { ranges: "bad", bestPd: "x" }
   ];
 
-  // Boot once so the frame exists, seed its own storage, then reload so the app
-  // reads the corrupt records at startup.
-  const boot = await bootFreshApp();
-  boot.frameWindow.localStorage.setItem(HISTORY_STORAGE_KEY, JSON.stringify(corrupt));
+  const { frameDocument } = await bootWithSeededHistory(corrupt);
   try {
-    await loadFrame();
-    const frameDocument = appFrame.contentWindow.document;
-    await waitFor("app boot with corrupt history", () => {
-      const startBtn = frameDocument.getElementById("startBtn");
-      const vergenceModeInput = frameDocument.getElementById("vergenceMode");
-      return startBtn && vergenceModeInput && vergenceModeInput.options.length > 0;
-    });
-
     // Three of the four seeded entries are objects and must each render a row.
     // A crash on the break-without-recovery record aborts the loop mid-render,
     // leaving fewer rows; a freeze on bestPd 1e12 hangs the boot wait above.
@@ -606,6 +595,57 @@ async function verifyCorruptHistoryBoots() {
     const statusText = String(frameDocument.getElementById("status")?.textContent || "");
     if (statusText.trim() === "") {
       throw new Error("Corrupt history: startup did not complete after rendering history");
+    }
+  } finally {
+    clearFrameSessionHistory();
+  }
+}
+
+async function bootWithSeededHistory(records) {
+  const boot = await bootFreshApp();
+  boot.frameWindow.localStorage.setItem(HISTORY_STORAGE_KEY, JSON.stringify(records));
+  await loadFrame();
+  const frameWindow = appFrame.contentWindow;
+  const frameDocument = frameWindow.document;
+  await waitFor("app boot with seeded history", () => {
+    const startBtn = frameDocument.getElementById("startBtn");
+    const vergenceModeInput = frameDocument.getElementById("vergenceMode");
+    return startBtn && vergenceModeInput && vergenceModeInput.options.length > 0;
+  });
+  installFullscreenStub(frameWindow);
+  return { frameWindow, frameDocument };
+}
+
+async function verifyDebugSessionMarked() {
+  const seeded = [
+    {
+      endedAt: new Date(600000).toISOString(),
+      mode: "convergence", bestPd: 10, totalScore: 4, rounds: 10, suppressions: 0,
+      ranges: [{ exercise: "convergence", breakPd: 14, recoveryPd: 9 }]
+    },
+    {
+      endedAt: new Date(1200000).toISOString(),
+      debug: true, mode: "convergence", bestPd: 40, totalScore: 8, rounds: 12, suppressions: 0,
+      ranges: [{ exercise: "convergence", breakPd: 44, recoveryPd: 30 }]
+    }
+  ];
+
+  const { frameDocument } = await bootWithSeededHistory(seeded);
+  try {
+    const rows = [...frameDocument.getElementById("historyTableBody").children];
+    if (rows.length !== 2) {
+      throw new Error(`Debug tagging: expected 2 rows, got ${rows.length}`);
+    }
+    const debugRows = rows.filter(row => row.textContent.includes("(debug)"));
+    if (debugRows.length !== 1) {
+      throw new Error(`Debug tagging: expected exactly 1 row marked debug, got ${debugRows.length}`);
+    }
+    // Only one of the two sessions is non-debug, so once the debug session is
+    // excluded the trend has a single point and stays hidden. If the filter
+    // were missing, both points would show and the chart would appear.
+    const trendWrap = frameDocument.getElementById("historyTrendWrap");
+    if (!trendWrap.hidden) {
+      throw new Error("Debug tagging: trend chart included the debug session");
     }
   } finally {
     clearFrameSessionHistory();
@@ -702,6 +742,9 @@ async function runSmokeSuite() {
   try {
     await verifyCorruptHistoryBoots();
     recordResult("pass", "Corrupt history boots and renders safely");
+
+    await verifyDebugSessionMarked();
+    recordResult("pass", "Debug sessions are marked and kept out of the trend");
 
     for (const scenario of MODE_SCENARIOS) {
       await runModeScenario(scenario);
