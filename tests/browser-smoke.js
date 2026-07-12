@@ -750,6 +750,47 @@ async function verifyTrendHoverUsesCache() {
   }
 }
 
+function importFileIntoInput(frameWindow, fileInput, text) {
+  const file = new frameWindow.File([text], "history.json", { type: "application/json" });
+  const transfer = new frameWindow.DataTransfer();
+  transfer.items.add(file);
+  fileInput.files = transfer.files;
+  fileInput.dispatchEvent(new (frameWindow.Event || Event)("change", { bubbles: true }));
+  return delay(60);
+}
+
+async function verifyHistoryImport() {
+  const { frameWindow, frameDocument } = await bootFreshApp();
+  try {
+    const fileInput = frameDocument.getElementById("historyImportFile");
+    const tableBody = frameDocument.getElementById("historyTableBody");
+    const statusEl = frameDocument.getElementById("status");
+
+    const records = [
+      { endedAt: new Date(600000).toISOString(), mode: "convergence", bestPd: 10, totalScore: 4, rounds: 10, suppressions: 0, ranges: [] },
+      { endedAt: new Date(1200000).toISOString(), mode: "divergence", bestPd: 12, totalScore: 5, rounds: 11, suppressions: 0, ranges: [] }
+    ];
+
+    await importFileIntoInput(frameWindow, fileInput, JSON.stringify(records));
+    await waitFor("import adds two sessions", () =>
+      tableBody.children.length === 2 && String(statusEl.textContent || "").includes("Imported 2 new"));
+
+    // Re-importing the same file must not duplicate anything.
+    await importFileIntoInput(frameWindow, fileInput, JSON.stringify(records));
+    await waitFor("re-import dedupes", () =>
+      tableBody.children.length === 2 && String(statusEl.textContent || "").includes("Imported 0 new"));
+
+    // A malformed file is rejected and leaves the history untouched.
+    await importFileIntoInput(frameWindow, fileInput, "not json {");
+    await waitFor("invalid import warns", () => String(statusEl.textContent || "").includes("Import failed"));
+    if (tableBody.children.length !== 2) {
+      throw new Error(`Invalid import changed the history: ${tableBody.children.length} rows`);
+    }
+  } finally {
+    clearFrameSessionHistory();
+  }
+}
+
 async function runModeScenario(scenario) {
   const { frameWindow, frameDocument } = await bootFreshApp();
   recordResult("pass", `${scenario.label}: app loaded`);
@@ -856,6 +897,9 @@ async function runSmokeSuite() {
 
     await verifyTrendHoverUsesCache();
     recordResult("pass", "Trend hover uses cached data and keeps the chart up");
+
+    await verifyHistoryImport();
+    recordResult("pass", "History import merges and dedupes, rejects bad files");
 
     for (const scenario of MODE_SCENARIOS) {
       await runModeScenario(scenario);

@@ -54,6 +54,10 @@ Browser-based vergence training prototype using red/cyan anaglyph random-dot ste
   (`localStorage`, last 200 sessions). The `Session History` panel below the
   app lists recent sessions and offers JSON/CSV export for sharing with a
   doctor, plus a `Clear History` control.
+- `Import JSON` reads a file made by `Export JSON` and merges it into the
+  stored history, keyed on each session's timestamp so re-importing or
+  combining two devices never creates duplicates. This is the way to move your
+  history to a new browser or machine.
 
 ## Session Setup
 

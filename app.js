@@ -274,6 +274,8 @@ const historyTrendEl = document.getElementById("historyTrend");
 const historyTrendTooltipEl = document.getElementById("historyTrendTooltip");
 const historyExportJsonBtn = document.getElementById("historyExportJsonBtn");
 const historyExportCsvBtn = document.getElementById("historyExportCsvBtn");
+const historyImportBtn = document.getElementById("historyImportBtn");
+const historyImportFile = document.getElementById("historyImportFile");
 const historyClearBtn = document.getElementById("historyClearBtn");
 
 const canvas = document.getElementById("viewer");
@@ -344,6 +346,8 @@ if (
   !historyTrendTooltipEl ||
   !historyExportJsonBtn ||
   !historyExportCsvBtn ||
+  !historyImportBtn ||
+  !historyImportFile ||
   !historyClearBtn
 ) {
   throw new Error("History element(s) missing.");
@@ -479,6 +483,8 @@ historyTrendEl.addEventListener("mousemove", onTrendHover);
 historyTrendEl.addEventListener("mouseleave", onTrendHoverEnd);
 historyExportJsonBtn.addEventListener("click", exportSessionHistoryJson);
 historyExportCsvBtn.addEventListener("click", exportSessionHistoryCsv);
+historyImportBtn.addEventListener("click", () => historyImportFile.click());
+historyImportFile.addEventListener("change", onHistoryImportFileChosen);
 historyClearBtn.addEventListener("click", clearSessionHistoryWithConfirm);
 window.addEventListener("blur", pauseSessionForFocusLoss);
 document.addEventListener("visibilitychange", onVisibilityChange);
@@ -2715,6 +2721,72 @@ function exportSessionHistoryCsv() {
     ].map(coreCsvEscapeField).join(","));
   }
   downloadTextFile("vergence-trainer-history.csv", "text/csv", lines.join("\n"));
+}
+
+function onHistoryImportFileChosen(event) {
+  const file = event.target.files && event.target.files[0];
+  // Reset so choosing the same file again still fires a change event.
+  event.target.value = "";
+  if (file) importSessionHistoryFromFile(file);
+}
+
+// Imports a previously exported JSON history and merges it with what is stored,
+// keyed on endedAt so re-importing or combining devices never duplicates a
+// session. Non-object entries and those without an endedAt are skipped.
+function importSessionHistoryFromFile(file) {
+  const reader = new FileReader();
+  reader.onerror = () => updateStatus("Import failed: the file could not be read.", true);
+  reader.onload = () => {
+    let parsed;
+    try {
+      parsed = JSON.parse(String(reader.result));
+    } catch {
+      updateStatus("Import failed: that file is not valid JSON.", true);
+      return;
+    }
+    if (!Array.isArray(parsed)) {
+      updateStatus("Import failed: expected a JSON array of sessions (an Export JSON file).", true);
+      return;
+    }
+
+    const incoming = parsed.filter(entry => entry && typeof entry === "object" && typeof entry.endedAt === "string");
+    const skipped = parsed.length - incoming.length;
+
+    const byEndedAt = new Map();
+    for (const record of readSessionHistory()) {
+      if (typeof record.endedAt === "string") byEndedAt.set(record.endedAt, record);
+    }
+    let added = 0;
+    for (const record of incoming) {
+      if (!byEndedAt.has(record.endedAt)) {
+        byEndedAt.set(record.endedAt, record);
+        added += 1;
+      }
+    }
+
+    const merged = [...byEndedAt.values()]
+      .sort((a, b) => String(a.endedAt).localeCompare(String(b.endedAt)))
+      .slice(-Math.max(1, HISTORY_MAX_ENTRIES));
+
+    let saved = false;
+    try {
+      if (window.localStorage) {
+        window.localStorage.setItem(HISTORY_STORAGE_KEY, JSON.stringify(merged));
+        saved = true;
+      }
+    } catch {
+      saved = false;
+    }
+    if (!saved) {
+      updateStatus("Import failed: browser storage is full or blocked.", true);
+      return;
+    }
+
+    renderSessionHistory();
+    const skippedText = skipped > 0 ? ` Skipped ${skipped} entr${skipped === 1 ? "y" : "ies"} without a valid session shape.` : "";
+    updateStatus(`Imported ${added} new session${added === 1 ? "" : "s"} from ${incoming.length} in the file.${skippedText}`, added === 0 && incoming.length === 0);
+  };
+  reader.readAsText(file);
 }
 
 function updateStatus(text, danger = false) {
