@@ -1000,9 +1000,31 @@ function initializeConfigInputs() {
   const sanitizedConfig = readConfigInputs();
   applyConfigInputs(sanitizedConfig);
   persistConfig(sanitizedConfig);
+  appendTooltipDefaults();
   updateVergenceModeDescription();
   syncMonitorWidthSetupUi();
   syncSessionLayoutMode();
+}
+
+// Appends each setting's real default to its tooltip so a user who changes a
+// value knows what to return to. Defaults are read from config here rather than
+// written into the markup, so the two can never drift apart.
+function appendTooltipDefaults() {
+  const defaults = [
+    [leftDotIntensityInput, DEFAULT_LEFT_DOT_INTENSITY.toFixed(2)],
+    [rightDotIntensityInput, DEFAULT_RIGHT_DOT_INTENSITY.toFixed(2)],
+    [viewDistanceInput, `${DEFAULT_VIEW_DISTANCE_IN} in`],
+    [roundSecondsInput, `${DEFAULT_ROUND_SECONDS}s`],
+    [goalPdInput, `${DEFAULT_GOAL_PD}Δ`],
+    [sessionMinutesInput, `${DEFAULT_SESSION_MINUTES} min`]
+  ];
+  for (const [input, defaultText] of defaults) {
+    const label = document.querySelector(`label[for="${input.id}"]`);
+    const base = label?.getAttribute("data-tip");
+    if (base && !base.includes("Default:")) {
+      label.setAttribute("data-tip", `${base} Default: ${defaultText}.`);
+    }
+  }
 }
 
 function readConfigInputs() {

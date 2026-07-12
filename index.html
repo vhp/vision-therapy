@@ -82,7 +82,11 @@
             step="1"
             value="30"
           />
-          <label for="sessionMinutes">Session Minutes</label>
+          <label
+            for="sessionMinutes"
+            class="has-tooltip"
+            data-tip="How long the whole session runs before the summary appears."
+          >Session Minutes</label>
           <input
             id="sessionMinutes"
             type="number"
@@ -198,7 +202,7 @@
             <label
               for="leftDotIntensity"
               class="has-tooltip"
-              data-tip="Fixes ghosting: with glasses on, close one eye at a time. If red dots faintly show through the wrong lens, lower this until they disappear."
+              data-tip="Brightness of the red dots, 0.3 to 1.0. It sits just under full by default so the dots stay crisp without glare or bleed. Lower it if, with glasses on and one eye closed at a time, red dots show faintly through the wrong lens (ghosting)."
             >Red Dot Intensity</label>
             <div class="intensity-control">
               <input id="leftDotIntensity" type="range" min="0.3" max="1" step="0.05" value="0.9" />
@@ -207,7 +211,7 @@
             <label
               for="rightDotIntensity"
               class="has-tooltip"
-              data-tip="Fixes ghosting: with glasses on, close one eye at a time. If cyan dots faintly show through the wrong lens, lower this until they disappear."
+              data-tip="Brightness of the cyan dots, 0.3 to 1.0. It sits just under full by default so the dots stay crisp without glare or bleed. Lower it if, with glasses on and one eye closed at a time, cyan dots show faintly through the wrong lens (ghosting)."
             >Cyan Dot Intensity</label>
             <div class="intensity-control">
               <input id="rightDotIntensity" type="range" min="0.3" max="1" step="0.05" value="0.9" />
