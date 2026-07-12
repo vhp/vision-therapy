@@ -34,6 +34,12 @@ Browser-based vergence training prototype using red/cyan anaglyph random-dot ste
   channel, close enough to watch without leaving fixation. If either fades,
   that eye is suppressing: `S` reports it (score unchanged, demand drops, new
   round). Suppression counts appear in the session summary.
+- A fraction of rounds (`CATCH_TRIAL_PROBABILITY` in config.js, default 15%)
+  are catch trials with no real target. The honest response is `Space`;
+  choosing a direction is a false alarm. Catch trials never change the score,
+  demand, or ranges. The summary and export report catch count and false
+  alarms, so a high false-alarm rate flags guessing. Append `?catch=<0..1>` to
+  the URL to change the rate for a session (e.g. `?catch=0` to turn them off).
 - `P` = pause/resume.
 - `Esc` exits fullscreen and pauses.
 - Leaving the tab/window auto-pauses the session so timing does not keep running in the background.

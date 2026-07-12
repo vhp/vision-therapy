@@ -56,6 +56,7 @@ const {
   FACILITY_BASE_OUT_PD = 12,
   SMOOTH_RAMP_PD_PER_SEC = 0.4,
   SMOOTH_BREAK_DROP_PD = 8,
+  CATCH_TRIAL_PROBABILITY = 0.15,
   INACTIVITY_PAUSE_MS,
   NEXT_ROUND_DELAY_MS,
   CONFIG_STORAGE_KEY,
@@ -211,6 +212,11 @@ const DEFAULT_RIGHT_DOT_INTENSITY = Math.min(MAX_DOT_INTENSITY, Math.max(MIN_DOT
 const URL_FLAGS = readUrlFlags();
 const DEBUG_MODE = URL_FLAGS.debug;
 const CLEAR_SAVED_CONFIG_ON_LOAD = URL_FLAGS.clearSettings;
+// A ?catch=<0..1> URL value overrides how often a round is a catch trial;
+// otherwise the configured rate is used.
+const CATCH_PROBABILITY = URL_FLAGS.catchProbability !== null
+  ? URL_FLAGS.catchProbability
+  : Math.min(1, Math.max(0, CATCH_TRIAL_PROBABILITY));
 
 const scoreEl = document.getElementById("score");
 const prismEl = document.getElementById("prism");
@@ -268,6 +274,7 @@ const sumWrongEl = document.getElementById("sumWrong");
 const sumTimeoutsEl = document.getElementById("sumTimeouts");
 const sumSkipsEl = document.getElementById("sumSkips");
 const sumSuppressionsEl = document.getElementById("sumSuppressions");
+const sumCatchEl = document.getElementById("sumCatch");
 
 const historyCardEl = document.getElementById("historyCard");
 const historyEmptyEl = document.getElementById("historyEmpty");
@@ -336,7 +343,8 @@ if (
   !sumWrongEl ||
   !sumTimeoutsEl ||
   !sumSkipsEl ||
-  !sumSuppressionsEl
+  !sumSuppressionsEl ||
+  !sumCatchEl
 ) {
   throw new Error("Summary element(s) missing.");
 }
@@ -387,6 +395,9 @@ const state = {
   suppressionCount: 0,
   staircaseStreak: 0,
   facilityPhase: 0,
+  catchTrial: false,
+  catchTotal: 0,
+  catchFalseAlarm: 0,
   metricsByExercise: Object.create(null),
   vergenceRanges: Object.create(null),
   sessionDurationMs: DEFAULT_SESSION_MINUTES * 60_000,
@@ -662,6 +673,9 @@ function startRound() {
     state.currentPd = difficultyToPd(state.difficultySteps, state.monitorWidthIn, state.viewDistanceIn);
   }
   state.targetSide = SIDES[(Math.random() * SIDES.length) | 0];
+  // A catch trial shows no real target; the honest response is Space. Answering
+  // a direction is a false alarm, which flags guessing.
+  state.catchTrial = Math.random() < CATCH_PROBABILITY;
   state.roundSeed = ((Math.random() * 0xffffffff) | 0) >>> 0;
   state.roundStartTs = now;
   state.roundEndTs = state.roundStartTs + state.roundDurationMs;
@@ -708,12 +722,21 @@ function handleRoundTimeout() {
 
   stopRoundTicker();
 
-  const timeoutScore = recordScoringEvent("timeout", state.roundVergence);
-  state.staircaseStreak = 0;
-  const pdDelta = applyErrorDemandDrop();
-  setRoundDebugState("timeout", "-", state.targetSide, pdDelta);
-  playNegativeFeedbackBeep();
-  updateStatus(`Round timeout (${formatExerciseLabel(timeoutScore.exerciseKey)}). Score -1.`, true);
+  if (state.catchTrial) {
+    // No target to miss: letting the clock run out is a correct rejection, not
+    // a scored error, so demand and the streak are left untouched.
+    recordCatchResponse(false);
+    setRoundDebugState("catchTimeout", "-", "-", 0);
+    beep(660, 120);
+    updateStatus("No target that round. Nothing to report.");
+  } else {
+    const timeoutScore = recordScoringEvent("timeout", state.roundVergence);
+    state.staircaseStreak = 0;
+    const pdDelta = applyErrorDemandDrop();
+    setRoundDebugState("timeout", "-", state.targetSide, pdDelta);
+    playNegativeFeedbackBeep();
+    updateStatus(`Round timeout (${formatExerciseLabel(timeoutScore.exerciseKey)}). Score -1.`, true);
+  }
   updateHud();
 
   scheduleNextRoundAfterDelay(() => {
@@ -759,6 +782,24 @@ function onKeyDown(event) {
       `Suppression reported (${formatExerciseLabel(suppressionScore.exerciseKey)}). ${demandText} Blink and refocus; both marker dots should stay visible.`,
       true
     );
+    updateHud();
+    startRound();
+    return;
+  }
+
+  if (state.catchTrial && (event.code === "Space" || SIDE_KEYS[event.key])) {
+    event.preventDefault();
+    state.lastResponseTs = performance.now();
+    const falseAlarm = event.code !== "Space";
+    recordCatchResponse(falseAlarm);
+    setRoundDebugState(falseAlarm ? "catchFalseAlarm" : "catchReject", falseAlarm ? SIDE_KEYS[event.key] : "space", "-", 0);
+    if (falseAlarm) {
+      playNegativeFeedbackBeep();
+      updateStatus("That round had no target. Wait for a clear depth pop before choosing a side.", true);
+    } else {
+      playPositiveFeedbackBeep();
+      updateStatus("Correct: no target that round.");
+    }
     updateHud();
     startRound();
     return;
@@ -1429,8 +1470,18 @@ function resetScoringState() {
   state.timeoutCount = 0;
   state.suppressionCount = 0;
   state.staircaseStreak = 0;
+  state.catchTrial = false;
+  state.catchTotal = 0;
+  state.catchFalseAlarm = 0;
   state.metricsByExercise = Object.create(null);
   state.vergenceRanges = Object.create(null);
+}
+
+// Catch trials measure guessing separately from the skill score, so they never
+// touch the score, exercise metrics, staircase, or demand.
+function recordCatchResponse(isFalseAlarm) {
+  state.catchTotal += 1;
+  if (isFalseAlarm) state.catchFalseAlarm += 1;
 }
 
 function normalizeExerciseKey(value) {
@@ -1999,6 +2050,7 @@ function renderScene() {
     y: squareDisparity * 0.5 * vergenceVector.y
   };
 
+  const showTarget = trainingActive && !state.catchTrial;
   drawStereoFieldGlow(ctx, leftEyeCenter, rightEyeCenter, fieldGeometry);
   drawRandomDotStereoSquare(
     ctx,
@@ -2007,8 +2059,8 @@ function renderScene() {
     rightEyeCenter,
     fieldGeometry,
     squareShift,
-    trainingActive ? state.targetSide : "up",
-    trainingActive
+    showTarget ? state.targetSide : "up",
+    showTarget
   );
   if (trainingActive) {
     drawSuppressionMarkers(ctx, leftEyeCenter, rightEyeCenter, fieldGeometry.extent);
@@ -2425,6 +2477,9 @@ function showSummaryCard(reachedGoal) {
   sumTimeoutsEl.textContent = String(state.timeoutCount);
   sumSkipsEl.textContent = String(state.skipCount);
   sumSuppressionsEl.textContent = String(state.suppressionCount);
+  sumCatchEl.textContent = state.catchTotal > 0
+    ? `${state.catchTotal} (${state.catchFalseAlarm})`
+    : "-";
   summaryCardEl.classList.remove("hidden");
 }
 
@@ -2452,6 +2507,8 @@ function buildSessionHistoryRecord(reachedGoal) {
     timeouts: state.timeoutCount,
     skips: state.skipCount,
     suppressions: state.suppressionCount,
+    catchTotal: state.catchTotal,
+    catchFalseAlarm: state.catchFalseAlarm,
     ranges,
     facility: isFacilityMode() ? { cycles: getFacilityCycles(), cpm: getFacilityCpm() } : null
   };
@@ -2757,7 +2814,7 @@ function exportSessionHistoryCsv() {
   const header = [
     "endedAt", "debug", "mode", "visualPreset", "fieldSize", "redLensSide", "sessionMinutes", "goalPd", "bestPd", "reachedGoal",
     "totalScore", "rounds", "correct", "wrong", "timeouts", "skips", "suppressions",
-    "bestBreakPd", "bestRecoveryPd", "facilityCycles", "facilityCpm"
+    "catchTotal", "catchFalseAlarm", "bestBreakPd", "bestRecoveryPd", "facilityCycles", "facilityCpm"
   ];
   const lines = [header.map(coreCsvEscapeField).join(",")];
   for (const record of history) {
@@ -2780,6 +2837,8 @@ function exportSessionHistoryCsv() {
       record.timeouts ?? "",
       record.skips ?? "",
       record.suppressions ?? "",
+      record.catchTotal ?? "",
+      record.catchFalseAlarm ?? "",
       bestRange ? bestRange.breakPd : "",
       bestRange ? bestRange.recoveryPd : "",
       record.facility?.cycles ?? "",
@@ -2885,6 +2944,8 @@ function updateDebugStatus() {
     `event=${state.lastRoundEvent}`,
     `input=${state.lastInputSide}`,
     `target=${state.lastTargetSide}`,
+    `catch=${state.catchTrial ? "yes" : "no"}`,
+    `catchFA=${state.catchFalseAlarm}/${state.catchTotal}`,
     `streak=${state.staircaseStreak}/${STAIRCASE_CORRECT_PER_STEP_UP}`,
     `delta=${deltaText}`,
     `scores=${formatScoreHudText()}`,
@@ -2901,8 +2962,16 @@ function readUrlFlags() {
   const params = new URLSearchParams(window.location.search);
   return {
     debug: parseBooleanFlag(params.get("debug")),
-    clearSettings: parseBooleanFlag(params.get("clearSettings")) || parseBooleanFlag(params.get("reset"))
+    clearSettings: parseBooleanFlag(params.get("clearSettings")) || parseBooleanFlag(params.get("reset")),
+    catchProbability: parseProbabilityFlag(params.get("catch"))
   };
+}
+
+function parseProbabilityFlag(value) {
+  if (value === null) return null;
+  const parsed = Number.parseFloat(value);
+  if (!Number.isFinite(parsed)) return null;
+  return Math.min(1, Math.max(0, parsed));
 }
 
 function parseBooleanFlag(value) {

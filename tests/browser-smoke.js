@@ -3,6 +3,9 @@ const resultsEl = document.getElementById("results");
 const appFrame = document.getElementById("appFrame");
 const environmentWarningEl = document.getElementById("environmentWarning");
 let runInProgress = false;
+// Existing scenarios answer with arrows and must never hit a catch trial, so
+// they load with catch trials off. The catch scenario raises it to 1.
+let catchParamForBoot = "0";
 const STATIC_SERVER_HELP = "Serve the repo from its root with `python3 -m http.server 4173`, then open `http://localhost:4173/tests/browser-smoke.html`.";
 const MODE_SCENARIOS = [
   {
@@ -77,6 +80,17 @@ const MODE_SCENARIOS = [
     expectedNextExercises: ["Divergence"],
     expectedAxis: "H",
     suppressionDemandText: "Demand held"
+  },
+  {
+    label: "Catch Trials",
+    vergenceMode: "convergence",
+    fieldShape: "square",
+    verticalPolarity: "standard",
+    catchParam: "1",
+    expectedInitialExercises: ["Convergence"],
+    expectedNextExercises: ["Convergence"],
+    expectedAxis: "H",
+    verifyCatchTrials: true
   },
   {
     label: "Smooth Vergence (Ramp)",
@@ -190,6 +204,7 @@ function getAppFrameUrl() {
   const url = new URL("../index.html", window.location.href);
   url.searchParams.set("debug", "1");
   url.searchParams.set("clearSettings", "1");
+  url.searchParams.set("catch", catchParamForBoot);
   url.searchParams.set("run", String(Date.now()));
   return url.toString();
 }
@@ -601,6 +616,30 @@ async function verifySmoothRamp(frameDocument) {
   await waitFor("smooth demand ramps up", () => readPd() > before + 0.3, 5000);
 }
 
+async function verifyCatchTrials(frameWindow, frameDocument, debugStatusEl) {
+  const roundEl = frameDocument.getElementById("round");
+  const initial = parseDebugStatus(debugStatusEl.textContent);
+  if (initial.catch !== "yes") {
+    throw new Error(`Catch trials: expected every round to be a catch trial, got catch=${initial.catch}`);
+  }
+
+  // Choosing a direction with no target present is a false alarm.
+  const roundBefore = Number(roundEl.textContent);
+  dispatchKey(frameWindow, "ArrowUp", "ArrowUp");
+  await waitFor("catch false alarm counted", () => {
+    const d = parseDebugStatus(debugStatusEl.textContent);
+    return d.catchFA === "1/1" && d.total === "0" && Number(roundEl.textContent) > roundBefore;
+  });
+
+  // Pressing Space is the correct rejection: total rises, false alarms do not,
+  // and the score stays untouched.
+  dispatchKey(frameWindow, "Space", " ");
+  await waitFor("catch correct rejection counted", () => {
+    const d = parseDebugStatus(debugStatusEl.textContent);
+    return d.catchFA === "1/2" && d.total === "0";
+  });
+}
+
 async function verifySuppressionMessage(frameWindow, frameDocument, expectedFragment) {
   const statusEl = frameDocument.getElementById("status");
   dispatchKey(frameWindow, "KeyS", "s");
@@ -810,7 +849,9 @@ async function verifyHistoryImport() {
 }
 
 async function runModeScenario(scenario) {
+  catchParamForBoot = scenario.catchParam || "0";
   const { frameWindow, frameDocument } = await bootFreshApp();
+  catchParamForBoot = "0";
   recordResult("pass", `${scenario.label}: app loaded`);
   recordResult("pass", `${scenario.label}: fullscreen requests stubbed`);
 
@@ -869,6 +910,12 @@ async function runModeScenario(scenario) {
   if (scenario.verifyResumeDisplayChange) {
     await verifyResumeDisplayChange(frameWindow, frameDocument, startBtn);
     recordResult("pass", `${scenario.label}: resume after display change ends session`);
+    return;
+  }
+
+  if (scenario.verifyCatchTrials) {
+    await verifyCatchTrials(frameWindow, frameDocument, debugStatusEl);
+    recordResult("pass", `${scenario.label}: false alarms and correct rejections tracked`);
     return;
   }
 

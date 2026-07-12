@@ -256,6 +256,12 @@
           </li>
           <li><kbd>Space</kbd> = cannot see target, score -1 and refresh</li>
           <li>
+            Some rounds are catch trials with no real target. If you never get
+            a clear depth pop, press <kbd>Space</kbd>: that is the correct call.
+            Choosing a direction on those rounds is a false alarm and is
+            tracked separately, so answer only when you actually see the target.
+          </li>
+          <li>
             Two vigilance dots sit just above and below the fused center; each
             is visible to one eye only. If either fades, that eye is
             suppressing: press <kbd>S</kbd> (score unchanged, demand drops,
@@ -306,6 +312,7 @@
         <div><span>Timeouts</span><strong id="sumTimeouts">0</strong></div>
         <div><span>Skips</span><strong id="sumSkips">0</strong></div>
         <div><span>Suppressions</span><strong id="sumSuppressions">0</strong></div>
+        <div><span>Catch Trials (false alarms)</span><strong id="sumCatch">-</strong></div>
       </div>
     </section>
 
