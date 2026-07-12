@@ -2446,6 +2446,12 @@ function formatHistoryDate(isoText) {
   });
 }
 
+function formatHistoryDateShort(isoText) {
+  const date = new Date(isoText);
+  if (Number.isNaN(date.getTime())) return "-";
+  return date.toLocaleDateString(undefined, { year: "2-digit", month: "2-digit", day: "2-digit" });
+}
+
 function renderSessionHistory() {
   const history = readSessionHistory();
   const recent = history.slice(-10).reverse();
@@ -2503,8 +2509,11 @@ function pickTrendTickStep(maxValue) {
   return 200;
 }
 
-function renderSessionTrend(hoverIndex = null) {
-  const data = getTrendData();
+function renderSessionTrend(hoverIndex = null, cachedData = null) {
+  // Hover redraws pass the already-parsed data so a mousemove never re-reads
+  // and re-parses localStorage, and the highlight can't disagree with a
+  // concurrently changed store.
+  const data = cachedData || getTrendData();
   if (data.length < 2) {
     historyTrendWrapEl.hidden = true;
     trendModel = null;
@@ -2557,9 +2566,9 @@ function renderSessionTrend(hoverIndex = null) {
 
   trendCtx.textBaseline = "top";
   trendCtx.textAlign = "left";
-  trendCtx.fillText(formatHistoryDate(data[0].endedAt).split(",")[0], plotLeft, plotBottom + 6);
+  trendCtx.fillText(formatHistoryDateShort(data[0].endedAt), plotLeft, plotBottom + 6);
   trendCtx.textAlign = "right";
-  trendCtx.fillText(formatHistoryDate(data[data.length - 1].endedAt).split(",")[0], plotRight, plotBottom + 6);
+  trendCtx.fillText(formatHistoryDateShort(data[data.length - 1].endedAt), plotRight, plotBottom + 6);
 
   if (hoverIndex !== null && data[hoverIndex]) {
     trendCtx.strokeStyle = "#454545";
@@ -2626,7 +2635,7 @@ function onTrendHover(event) {
     }
   }
 
-  renderSessionTrend(nearestIndex);
+  renderSessionTrend(nearestIndex, data);
 
   const point = data[nearestIndex];
   historyTrendTooltipEl.replaceChildren();

@@ -652,6 +652,45 @@ async function verifyDebugSessionMarked() {
   }
 }
 
+async function verifyTrendHoverUsesCache() {
+  const seeded = [
+    { endedAt: new Date(600000).toISOString(), mode: "convergence", bestPd: 10, totalScore: 4, rounds: 10, suppressions: 0, ranges: [{ exercise: "convergence", breakPd: 14, recoveryPd: 9 }] },
+    { endedAt: new Date(1200000).toISOString(), mode: "convergence", bestPd: 16, totalScore: 6, rounds: 12, suppressions: 0, ranges: [{ exercise: "convergence", breakPd: 20, recoveryPd: 13 }] },
+    { endedAt: new Date(1800000).toISOString(), mode: "convergence", bestPd: 22, totalScore: 7, rounds: 14, suppressions: 0, ranges: [{ exercise: "convergence", breakPd: 26, recoveryPd: 18 }] }
+  ];
+
+  const { frameWindow, frameDocument } = await bootWithSeededHistory(seeded);
+  try {
+    const canvas = frameDocument.getElementById("historyTrend");
+    const tooltip = frameDocument.getElementById("historyTrendTooltip");
+    const trendWrap = frameDocument.getElementById("historyTrendWrap");
+    if (trendWrap.hidden) {
+      throw new Error("Trend hover: chart did not render for seeded data");
+    }
+
+    // Drop the store after the chart is drawn. A hover that re-read storage
+    // would find it empty and hide the chart; using the cached data keeps the
+    // chart up and shows the tooltip.
+    frameWindow.localStorage.removeItem(HISTORY_STORAGE_KEY);
+
+    const rect = canvas.getBoundingClientRect();
+    const MouseEventCtor = frameWindow.MouseEvent || MouseEvent;
+    canvas.dispatchEvent(new MouseEventCtor("mousemove", {
+      bubbles: true,
+      clientX: rect.left + rect.width * 0.5,
+      clientY: rect.top + rect.height * 0.5
+    }));
+
+    await waitFor("trend tooltip appears from cache", () =>
+      !tooltip.hidden && tooltip.textContent.includes("Best PD") && !trendWrap.hidden);
+
+    canvas.dispatchEvent(new MouseEventCtor("mouseleave", { bubbles: true }));
+    await waitFor("trend tooltip hides on leave", () => tooltip.hidden);
+  } finally {
+    clearFrameSessionHistory();
+  }
+}
+
 async function runModeScenario(scenario) {
   const { frameWindow, frameDocument } = await bootFreshApp();
   recordResult("pass", `${scenario.label}: app loaded`);
@@ -745,6 +784,9 @@ async function runSmokeSuite() {
 
     await verifyDebugSessionMarked();
     recordResult("pass", "Debug sessions are marked and kept out of the trend");
+
+    await verifyTrendHoverUsesCache();
+    recordResult("pass", "Trend hover uses cached data and keeps the chart up");
 
     for (const scenario of MODE_SCENARIOS) {
       await runModeScenario(scenario);
