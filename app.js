@@ -121,6 +121,16 @@ const DEFAULT_VERGENCE_MODE = VERGENCE_MODE_MAP.has("convergence")
   ? "convergence"
   : VERGENCE_MODES[0].value;
 
+const VERGENCE_MODE_DESCRIPTIONS = Object.freeze({
+  convergence: "Eyes turn inward to fuse. Demand rises as you answer correctly.",
+  divergence: "Eyes relax outward to fuse. Demand rises as you answer correctly.",
+  alternate: "Switches between convergence and divergence every round.",
+  random_jump: "Random mix of convergence and divergence rounds, so you cannot anticipate the direction.",
+  facility: "Jumps between a fixed easy divergence and hard convergence pair. Trains switching speed, scored in cycles per minute.",
+  vergence_up: "One eye's image sits higher than the other. Only train this if a doctor asked you to.",
+  vergence_down: "One eye's image sits lower than the other. Only train this if a doctor asked you to."
+});
+
 const FALLBACK_VISUAL_PRESET_TUNING = Object.freeze({
   targetSplitPx: TARGET_SPLIT_PX,
   targetPopSizePx: TARGET_POP_SIZE_PX,
@@ -215,6 +225,9 @@ const debugUpBtn = document.getElementById("debugUpBtn");
 const startBtn = document.getElementById("startBtn");
 const resetBtn = document.getElementById("resetBtn");
 const advancedSetupEl = document.querySelector(".advanced-setup");
+const setupNeededBadgeEl = document.getElementById("setupNeededBadge");
+const setupChecklistEl = document.getElementById("setupChecklist");
+const vergenceModeDescriptionEl = document.getElementById("vergenceModeDescription");
 
 const monitorWidthInput = document.getElementById("monitorWidth");
 const monitorWidthConfirmBtn = document.getElementById("monitorWidthConfirmBtn");
@@ -288,7 +301,10 @@ if (
   !leftDotIntensityValueEl ||
   !rightDotIntensityInput ||
   !rightDotIntensityValueEl ||
-  !lrSplitInput
+  !lrSplitInput ||
+  !setupNeededBadgeEl ||
+  !setupChecklistEl ||
+  !vergenceModeDescriptionEl
 ) {
   throw new Error("Training config input(s) missing.");
 }
@@ -569,6 +585,7 @@ function onConfigChange(event) {
   applyConfigToState(config);
   state.nowTs = performance.now();
   state.lastResponseTs = state.nowTs;
+  updateVergenceModeDescription();
   updateReadyStatus(config);
   updateHud();
   renderScene();
@@ -909,7 +926,7 @@ function initializeConfigInputs() {
   monitorWidthInput.min = String(MIN_MONITOR_WIDTH_IN);
   monitorWidthInput.max = String(MAX_MONITOR_WIDTH_IN);
   monitorWidthInput.step = "0.5";
-  monitorWidthInput.value = String(DEFAULT_MONITOR_WIDTH_IN);
+  monitorWidthInput.value = "";
 
   viewDistanceInput.min = String(MIN_VIEW_DISTANCE_IN);
   viewDistanceInput.max = String(MAX_VIEW_DISTANCE_IN);
@@ -961,6 +978,7 @@ function initializeConfigInputs() {
   const sanitizedConfig = readConfigInputs();
   applyConfigInputs(sanitizedConfig);
   persistConfig(sanitizedConfig);
+  updateVergenceModeDescription();
   syncMonitorWidthSetupUi();
   syncSessionLayoutMode();
 }
@@ -1014,7 +1032,12 @@ function hydratePersistedConfigIntoInputs() {
   const persisted = readPersistedConfig();
   if (!persisted) return null;
 
-  if (Number.isFinite(persisted.monitorWidthIn)) {
+  // Only restore a width the user actually set (confirmed, or awaiting
+  // reconfirm after a display change). A default that was merely persisted
+  // alongside other settings stays out of the field so it reads as unset.
+  const persistedWidthMeaningful = Number.isFinite(persisted.monitorWidthIn) &&
+    (getPersistedMonitorWidthConfirmed(persisted) || persisted.monitorWidthNeedsReconfirm === true);
+  if (persistedWidthMeaningful) {
     monitorWidthInput.value = String(persisted.monitorWidthIn);
   }
   if (Number.isFinite(persisted.viewDistanceIn)) {
@@ -1108,7 +1131,9 @@ function persistConfig(config) {
 }
 
 function applyConfigInputs(config) {
-  monitorWidthInput.value = formatInches(config.monitorWidthIn);
+  if (state.monitorWidthConfirmed || monitorWidthInput.value !== "") {
+    monitorWidthInput.value = formatInches(config.monitorWidthIn);
+  }
   viewDistanceInput.value = formatInches(config.viewDistanceIn);
   leftDotIntensityInput.value = String(config.leftDotIntensity);
   leftDotIntensityValueEl.textContent = config.leftDotIntensity.toFixed(2);
@@ -1219,13 +1244,35 @@ function focusBlockedSetupInput() {
 
 function syncMonitorWidthSetupUi() {
   const needsWidth = !state.monitorWidthConfirmed;
-  const needsSetup = needsWidth || !isRedLensSideChosen();
+  const needsLens = !isRedLensSideChosen();
+  const needsSetup = needsWidth || needsLens;
   if (advancedSetupEl instanceof HTMLDetailsElement) {
     advancedSetupEl.classList.toggle("needs-attention", needsSetup);
     if (needsSetup) {
       advancedSetupEl.open = true;
     }
   }
+
+  const neededSteps = [];
+  if (needsWidth) {
+    neededSteps.push(state.monitorWidthNeedsReconfirm
+      ? "Reconfirm Monitor Width: the display changed since it was last confirmed."
+      : "Measure your monitor width side to side and confirm it below.");
+  }
+  if (needsLens) {
+    neededSteps.push("Choose Red Lens Side: which eye is behind the red lens of your glasses.");
+  }
+  setupNeededBadgeEl.hidden = neededSteps.length === 0;
+  setupChecklistEl.replaceChildren();
+  for (const step of neededSteps) {
+    const item = document.createElement("li");
+    item.textContent = step;
+    setupChecklistEl.append(item);
+  }
+  setupChecklistEl.hidden = neededSteps.length === 0;
+  monitorWidthInput.classList.toggle("needs-value", needsWidth);
+  redLensSideInput.classList.toggle("needs-value", needsLens);
+
   monitorWidthConfirmBtn.hidden = state.running || state.paused || !needsWidth;
   monitorWidthConfirmBtn.textContent = state.monitorWidthNeedsReconfirm ? "Reconfirm" : "Confirm";
 }
@@ -1630,6 +1677,11 @@ function isRedLensSideChosen() {
 function normalizeVisualPreset(value) {
   if (VISUAL_PRESET_MAP.has(value)) return value;
   return DEFAULT_VISUAL_PRESET_VALUE;
+}
+
+function updateVergenceModeDescription() {
+  const mode = normalizeVergenceMode(vergenceModeInput.value);
+  vergenceModeDescriptionEl.textContent = VERGENCE_MODE_DESCRIPTIONS[mode] || "";
 }
 
 function getVergenceModeGroupLabel(modeValue) {

@@ -50,11 +50,29 @@
         </div>
 
         <div class="setup-grid core-setup">
-          <label for="vergenceMode">Vergence Mode</label>
+          <label
+            for="vergenceMode"
+            class="has-tooltip tip-wide"
+            data-tip="- Convergence: eyes turn inward. Builds the reserve used for near work like reading.
+- Divergence: eyes relax outward. Trains control for distance viewing.
+- Alternating: swaps direction every round. Trains flexibility between the two.
+- Random: unpredictable direction each round, so you cannot anticipate.
+- Facility: jumps between a fixed easy/hard pair, scored in cycles per minute. Trains switching speed.
+- Vergence Up/Down: vertical alignment work. Doctor-directed only."
+          >Vergence Mode</label>
           <select id="vergenceMode"></select>
-          <label for="visualPreset">Visual Preset</label>
+          <p id="vergenceModeDescription" class="mode-description"></p>
+          <label
+            for="visualPreset"
+            class="has-tooltip"
+            data-tip="How the dot field looks: dot sizes and how strongly the target stands out. Fine Dots is the hardest to see."
+          >Visual Preset</label>
           <select id="visualPreset"></select>
-          <label for="goalPd">Session Target (Δ)</label>
+          <label
+            for="goalPd"
+            class="has-tooltip"
+            data-tip="The demand, in prism diopters, you are aiming to reach this session. Hitting it shows Target Met in the summary."
+          >Session Target (Δ)</label>
           <input
             id="goalPd"
             type="number"
@@ -75,12 +93,13 @@
         </div>
 
         <details class="advanced-setup">
-          <summary>Advanced Settings</summary>
+          <summary>Advanced Settings<span id="setupNeededBadge" class="setup-badge" hidden>Setup needed</span></summary>
+          <ul id="setupChecklist" class="setup-checklist" hidden></ul>
           <div class="setup-grid">
             <label
               for="monitorWidth"
               class="monitor-width-label has-tooltip"
-              title="Measure the physical monitor width from side to side, not diagonally."
+              data-tip="Measure your screen side to side (not diagonally), in inches. Everything the app says in prism diopters is scaled from this, so it has to be right. If your measurement lands between marks, round up. Asked once, then saved in this browser."
             >
               Monitor Width (in, set once)
             </label>
@@ -91,11 +110,15 @@
                 min="10"
                 max="60"
                 step="0.5"
-                value="24"
+                placeholder="inches, e.g. 24"
               />
               <button id="monitorWidthConfirmBtn" type="button" class="ghost" hidden>Confirm</button>
             </div>
-            <label for="viewDistance">View Distance (in)</label>
+            <label
+              for="viewDistance"
+              class="has-tooltip"
+              data-tip="How far your eyes sit from the screen, in inches. Used together with Monitor Width to convert pixels into prism diopters."
+            >View Distance (in)</label>
             <input
               id="viewDistance"
               type="number"
@@ -104,7 +127,11 @@
               step="0.5"
               value="16"
             />
-            <label for="startPd" class="debug-only">Start PD (Δ)</label>
+            <label
+              for="startPd"
+              class="debug-only has-tooltip"
+              data-tip="Debug only: the demand the session starts at instead of zero."
+            >Start PD (Δ)</label>
             <input
               id="startPd"
               class="debug-only"
@@ -114,7 +141,11 @@
               step="1"
               value="0"
             />
-            <label for="roundSeconds">Round Seconds</label>
+            <label
+              for="roundSeconds"
+              class="has-tooltip"
+              data-tip="How long you get to answer each round. Running out of time beeps and scores -1."
+            >Round Seconds</label>
             <input
               id="roundSeconds"
               type="number"
@@ -123,12 +154,20 @@
               step="1"
               value="20"
             />
-            <label for="fieldShape">Field Shape</label>
+            <label
+              for="fieldShape"
+              class="has-tooltip"
+              data-tip="The outline of the dot field, circle or square. Purely visual preference."
+            >Field Shape</label>
             <select id="fieldShape">
               <option value="circle">Circle (Default)</option>
               <option value="square">Square</option>
             </select>
-            <label for="fieldSize">Field Size</label>
+            <label
+              for="fieldSize"
+              class="has-tooltip"
+              data-tip="Shrinks the whole dot field. A smaller field gives your eyes less to lock onto, which makes fusion harder."
+            >Field Size</label>
             <select id="fieldSize">
               <option value="large">Large (Default)</option>
               <option value="medium">Medium</option>
@@ -137,7 +176,7 @@
             <label
               for="redLensSide"
               class="has-tooltip"
-              title="Look at your anaglyph glasses: which eye is behind the red lens? This sets the convergence/divergence direction, so it must be answered once before starting. Saved in this browser."
+              data-tip="Look at your glasses: which eye is behind the red lens? This sets which direction counts as convergence, so it must be answered once before starting. To double-check: in Convergence mode the fused field should float in front of the screen; if it sinks behind, pick the other side."
             >
               Red Lens Side
             </label>
@@ -146,47 +185,43 @@
               <option value="left">Left eye</option>
               <option value="right">Right eye</option>
             </select>
-            <label for="verticalPolarity">Vertical Mode Mapping</label>
+            <label
+              for="verticalPolarity"
+              class="has-tooltip"
+              data-tip="Flips which direction counts as Vergence Up versus Vergence Down, if testing with your doctor shows your setup runs opposite."
+            >Vertical Mode Mapping</label>
             <select id="verticalPolarity">
               <option value="standard">Standard (Up = red up)</option>
               <option value="flipped">Flipped (Up = blue up)</option>
             </select>
-            <label for="leftDotIntensity">Red Dot Intensity</label>
+            <label
+              for="leftDotIntensity"
+              class="has-tooltip"
+              data-tip="Fixes ghosting: with glasses on, close one eye at a time. If red dots faintly show through the wrong lens, lower this until they disappear."
+            >Red Dot Intensity</label>
             <div class="intensity-control">
               <input id="leftDotIntensity" type="range" min="0.3" max="1" step="0.05" value="0.9" />
               <span id="leftDotIntensityValue" class="intensity-value">0.90</span>
             </div>
-            <label for="rightDotIntensity">Cyan Dot Intensity</label>
+            <label
+              for="rightDotIntensity"
+              class="has-tooltip"
+              data-tip="Fixes ghosting: with glasses on, close one eye at a time. If cyan dots faintly show through the wrong lens, lower this until they disappear."
+            >Cyan Dot Intensity</label>
             <div class="intensity-control">
               <input id="rightDotIntensity" type="range" min="0.3" max="1" step="0.05" value="0.9" />
               <span id="rightDotIntensityValue" class="intensity-value">0.90</span>
             </div>
-            <label for="lrSplit" class="readonly-label">Eye Split (px)</label>
+            <label
+              for="lrSplit"
+              class="readonly-label has-tooltip"
+              data-tip="Read-only: how far apart the red and cyan fields are drawn right now, in screen pixels, tagged H (horizontal) or V (vertical)."
+            >Eye Split (px)</label>
             <input id="lrSplit" type="text" value="0 px" readonly />
           </div>
-          <ul class="advanced-help-list">
-            <li>
-              <strong>Monitor Width / View Distance:</strong> set PD estimation scaling.
-              Monitor Width is saved in this browser after first setup.
-            </li>
-            <li class="debug-only"><strong>Start PD:</strong> debug-only value used as the initial PD estimate.</li>
-            <li><strong>Round Seconds:</strong> controls the round timer (default 20s). Timeout beeps and scores -1.</li>
-            <li><strong>Field Shape:</strong> changes only the outer stereogram field between `Circle` and `Square`.</li>
-            <li><strong>Field Size:</strong> shrinks the whole stereogram field. A smaller field gives less peripheral fusion support, making the task harder.</li>
-            <li class="debug-only"><strong>Debug Shortcuts:</strong> <kbd>[</kbd> or <kbd>-</kbd> / <kbd>_</kbd> for -1; <kbd>]</kbd> or <kbd>=</kbd> / <kbd>+</kbd> for +1. Works in fullscreen.</li>
-            <li>
-              <strong>Red Lens Side:</strong> must be answered once before the first
-              session; saved afterward. Self-test: in Convergence mode the fused
-              field should float in front of the screen; if it sinks behind,
-              pick the other side.
-            </li>
-            <li><strong>Vertical Mode Mapping:</strong> flips `Vergence Up` / `Vergence Down` polarity if clinical testing suggests the opposite convention.</li>
-            <li>
-              <strong>Dot Intensity:</strong> tunes anaglyph ghosting for your glasses.
-              With glasses on, close one eye at a time; if a color faintly shows
-              through the wrong lens, lower that color's intensity until it disappears.
-            </li>
-            <li><strong>Eye Split:</strong> read-only rendering split shown for reference, with `H` or `V` axis tags.</li>
+          <p class="advanced-hint">Hover any label for what it does.</p>
+          <ul class="advanced-help-list debug-only">
+            <li><strong>Debug Shortcuts:</strong> <kbd>[</kbd> or <kbd>-</kbd> / <kbd>_</kbd> for -1; <kbd>]</kbd> or <kbd>=</kbd> / <kbd>+</kbd> for +1. Works in fullscreen.</li>
           </ul>
         </details>
         <p id="status" class="status" aria-live="polite">Press Start to begin.</p>

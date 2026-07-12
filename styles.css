@@ -166,8 +166,8 @@ body.training-live .instructions {
 }
 
 .advanced-setup.needs-attention {
-  border-color: #8f7d3a;
-  box-shadow: 0 0 0 1px rgb(143 125 58 / 32%);
+  border-color: #7e4444;
+  box-shadow: 0 0 0 1px rgb(255 111 111 / 25%);
 }
 
 .advanced-setup summary {
@@ -175,6 +175,50 @@ body.training-live .instructions {
   font-size: 0.88rem;
   color: var(--muted);
   user-select: none;
+}
+
+.setup-checklist {
+  margin: 10px 0 2px;
+  padding-left: 18px;
+  color: #ffb3b3;
+  font-size: 0.8rem;
+}
+
+.setup-checklist li {
+  margin-bottom: 4px;
+  line-height: 1.35;
+}
+
+.setup-badge {
+  white-space: nowrap;
+  margin-left: 8px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid #7e4444;
+  background: #1d0f0f;
+  color: #ffb3b3;
+  font-size: 0.7rem;
+  letter-spacing: 0.04em;
+}
+
+.setup-grid input.needs-value,
+.setup-grid select.needs-value {
+  border-color: var(--danger);
+  box-shadow: 0 0 0 1px rgb(255 111 111 / 30%);
+}
+
+.advanced-hint {
+  margin: 10px 0 0;
+  font-size: 0.75rem;
+  color: #8d8d8d;
+}
+
+.core-setup .mode-description {
+  grid-column: 1 / -1;
+  margin: -4px 0 2px;
+  font-size: 0.78rem;
+  color: #8d8d8d;
+  line-height: 1.35;
 }
 
 .advanced-setup .setup-grid {
@@ -193,23 +237,56 @@ body.training-live .instructions {
   line-height: 1.35;
 }
 
+/* Labels wrap instead of overflowing, so a long label can never run under
+   the control next to it no matter how the text changes later. */
 .setup-grid label {
   font-size: 0.9rem;
   color: var(--muted);
-  white-space: nowrap;
-}
-
-.setup-grid label.monitor-width-label {
   white-space: normal;
+  overflow-wrap: break-word;
+  min-width: 0;
   line-height: 1.28;
 }
 
 .setup-grid label.has-tooltip {
   cursor: help;
+  position: relative;
   text-decoration-line: underline;
   text-decoration-style: dotted;
   text-decoration-color: #687482;
   text-underline-offset: 3px;
+}
+
+.setup-grid label.has-tooltip::before {
+  content: attr(data-tip);
+  white-space: pre-line;
+  position: absolute;
+  left: 0;
+  bottom: calc(100% + 8px);
+  width: 250px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid #44576c;
+  background: #0f1722;
+  color: #d8e4f0;
+  font-size: 0.75rem;
+  font-weight: 400;
+  line-height: 1.4;
+  white-space: normal;
+  z-index: 6;
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transition: opacity 120ms ease;
+}
+
+.setup-grid label.has-tooltip:hover::before {
+  opacity: 1;
+  visibility: visible;
+}
+
+.setup-grid label.tip-wide::before {
+  width: 300px;
 }
 
 .setup-grid label.has-tooltip::after {

@@ -86,12 +86,20 @@ When paused (for example after `Esc`):
 
 ## Modes and Presets
 
-- Vergence modes: `Convergence`, `Divergence`, `Jump Vergence (Alternating)`, `Jump Vergence (Random)`, `Vergence Facility (3Δ / 12Δ)`, `Vergence Up`, `Vergence Down`.
-- Facility mode alternates a fixed base-in/base-out demand pair
-  (`FACILITY_BASE_IN_PD` / `FACILITY_BASE_OUT_PD`, default 3Δ/12Δ). The pair
-  advances only on correct answers, demand never drifts, and the session
-  summary reports completed cycles and cycles per minute, matching the
-  clinical vergence facility test.
+- Vergence modes (a one-line description also shows under the mode picker):
+  - `Convergence`: eyes turn inward to fuse. Demand rises with correct answers.
+  - `Divergence`: eyes relax outward to fuse. Demand rises with correct answers.
+  - `Jump Vergence (Alternating)`: switches between convergence and divergence
+    every round.
+  - `Jump Vergence (Random)`: random mix of convergence and divergence rounds,
+    so the direction cannot be anticipated.
+  - `Vergence Facility (3Δ / 12Δ)`: jumps between a fixed easy divergence
+    demand and a hard convergence demand (`FACILITY_BASE_IN_PD` /
+    `FACILITY_BASE_OUT_PD` in config.js). The pair advances only on correct
+    answers and demand never drifts. Scored in cycles per minute like the
+    clinical prism-flipper facility test; the adult norm is about 15 cpm.
+  - `Vergence Up` / `Vergence Down`: vertical demand, where one eye's image
+    sits higher or lower than the other. Doctor-directed only.
 - Mode labels in this project are generic clinical/task labels rather than references to any outside product naming.
 - Visual presets (from `config.js`):
   - `Balanced (Default)`
