@@ -64,6 +64,9 @@ Browser-based vergence training prototype using red/cyan anaglyph random-dot ste
 - Once set, monitor width is cached in browser `localStorage` and reused.
 - If the app detects a display-context change (for example monitor resolution or device pixel ratio), monitor width must be reconfirmed before starting again.
 - `Field Shape` changes only the outer stereogram field between `Circle` and `Square`.
+- `Field Size` shrinks the whole stereogram field (`Large` / `Medium` /
+  `Small`). A smaller field gives less peripheral fusion support and is
+  harder, like the small-shape option in commercial vergence software.
 - `Vertical Mode Mapping` lets you flip the `Vergence Up` / `Vergence Down` polarity if clinical testing suggests the opposite convention.
 - `Red Dot Intensity` / `Cyan Dot Intensity` tune anaglyph ghosting for your
   glasses and monitor: with glasses on, close one eye at a time and lower the

@@ -128,6 +128,12 @@
               <option value="circle">Circle (Default)</option>
               <option value="square">Square</option>
             </select>
+            <label for="fieldSize">Field Size</label>
+            <select id="fieldSize">
+              <option value="large">Large (Default)</option>
+              <option value="medium">Medium</option>
+              <option value="small">Small (Harder)</option>
+            </select>
             <label for="verticalPolarity">Vertical Mode Mapping</label>
             <select id="verticalPolarity">
               <option value="standard">Standard (Up = red up)</option>
@@ -154,6 +160,7 @@
             <li class="debug-only"><strong>Start PD:</strong> debug-only value used as the initial PD estimate.</li>
             <li><strong>Round Seconds:</strong> controls the round timer (default 20s). Timeout beeps and scores -1.</li>
             <li><strong>Field Shape:</strong> changes only the outer stereogram field between `Circle` and `Square`.</li>
+            <li><strong>Field Size:</strong> shrinks the whole stereogram field. A smaller field gives less peripheral fusion support, making the task harder.</li>
             <li class="debug-only"><strong>Debug Shortcuts:</strong> <kbd>[</kbd> or <kbd>-</kbd> / <kbd>_</kbd> for -1; <kbd>]</kbd> or <kbd>=</kbd> / <kbd>+</kbd> for +1. Works in fullscreen.</li>
             <li><strong>Vertical Mode Mapping:</strong> flips `Vergence Up` / `Vergence Down` polarity if clinical testing suggests the opposite convention.</li>
             <li>

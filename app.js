@@ -157,6 +157,9 @@ const DEFAULT_VISUAL_PRESET_VALUE = VISUAL_PRESET_MAP.has(DEFAULT_VISUAL_PRESET)
 const DEFAULT_VISUAL_TUNING = getVisualPresetTuning(DEFAULT_VISUAL_PRESET_VALUE);
 const DEFAULT_FIELD_SHAPE_VALUE = DEFAULT_FIELD_SHAPE === "square" ? "square" : "circle";
 const FIELD_SHAPE_VALUES = Object.freeze(["circle", "square"]);
+const FIELD_SIZE_RATIOS = Object.freeze({ large: 0.34, medium: 0.27, small: 0.2 });
+const FIELD_SIZE_VALUES = Object.freeze(Object.keys(FIELD_SIZE_RATIOS));
+const DEFAULT_FIELD_SIZE_VALUE = "large";
 const DEFAULT_VERTICAL_POLARITY = "standard";
 const VERTICAL_POLARITY_VALUES = Object.freeze(["standard", "flipped"]);
 
@@ -221,6 +224,7 @@ const goalPdInput = document.getElementById("goalPd");
 const sessionMinutesInput = document.getElementById("sessionMinutes");
 const roundSecondsInput = document.getElementById("roundSeconds");
 const fieldShapeInput = document.getElementById("fieldShape");
+const fieldSizeInput = document.getElementById("fieldSize");
 const verticalPolarityInput = document.getElementById("verticalPolarity");
 const leftDotIntensityInput = document.getElementById("leftDotIntensity");
 const leftDotIntensityValueEl = document.getElementById("leftDotIntensityValue");
@@ -274,6 +278,7 @@ if (
   !sessionMinutesInput ||
   !roundSecondsInput ||
   !fieldShapeInput ||
+  !fieldSizeInput ||
   !verticalPolarityInput ||
   !leftDotIntensityInput ||
   !leftDotIntensityValueEl ||
@@ -335,6 +340,7 @@ const state = {
   goalPd: DEFAULT_GOAL_PD,
   vergenceMode: DEFAULT_VERGENCE_MODE,
   fieldShape: DEFAULT_FIELD_SHAPE_VALUE,
+  fieldSize: DEFAULT_FIELD_SIZE_VALUE,
   verticalPolarity: DEFAULT_VERTICAL_POLARITY,
   visualPreset: DEFAULT_VISUAL_PRESET_VALUE,
   visualTuning: DEFAULT_VISUAL_TUNING,
@@ -367,7 +373,7 @@ const state = {
   nowTs: performance.now(),
   pausedAtTs: 0,
   confirmedDisplayContext: null,
-  dots: buildDotField(INITIAL_DOT_COUNT, getFieldExtent(), 1001, DEFAULT_VISUAL_TUNING),
+  dots: buildDotField(INITIAL_DOT_COUNT, getFieldExtentForSize(DEFAULT_FIELD_SIZE_VALUE), 1001, DEFAULT_VISUAL_TUNING),
   lastRoundEvent: "idle",
   lastInputSide: "-",
   lastTargetSide: "-",
@@ -429,6 +435,7 @@ goalPdInput.addEventListener("change", onConfigChange);
 sessionMinutesInput.addEventListener("change", onConfigChange);
 roundSecondsInput.addEventListener("change", onConfigChange);
 fieldShapeInput.addEventListener("change", onConfigChange);
+fieldSizeInput.addEventListener("change", onConfigChange);
 verticalPolarityInput.addEventListener("change", onConfigChange);
 leftDotIntensityInput.addEventListener("input", onConfigChange);
 leftDotIntensityInput.addEventListener("change", onConfigChange);
@@ -924,6 +931,7 @@ function initializeConfigInputs() {
   roundSecondsInput.step = "1";
   roundSecondsInput.value = String(DEFAULT_ROUND_SECONDS);
   fieldShapeInput.value = DEFAULT_FIELD_SHAPE_VALUE;
+  fieldSizeInput.value = DEFAULT_FIELD_SIZE_VALUE;
   verticalPolarityInput.value = DEFAULT_VERTICAL_POLARITY;
 
   if (debugStatusEl) {
@@ -953,6 +961,7 @@ function readConfigInputs() {
   const viewDistanceRaw = Number.parseFloat(viewDistanceInput.value);
   const vergenceMode = normalizeVergenceMode(vergenceModeInput.value);
   const fieldShape = normalizeFieldShape(fieldShapeInput.value);
+  const fieldSize = normalizeFieldSize(fieldSizeInput.value);
   const verticalPolarity = normalizeVerticalPolarity(verticalPolarityInput.value);
   const visualPreset = normalizeVisualPreset(visualPresetInput.value);
   const startPdRaw = DEBUG_MODE ? Number.parseInt(startPdInput.value, 10) : DEFAULT_START_PD;
@@ -980,6 +989,7 @@ function readConfigInputs() {
     rightDotIntensity,
     vergenceMode,
     fieldShape,
+    fieldSize,
     verticalPolarity,
     visualPreset,
     startPd,
@@ -1010,6 +1020,9 @@ function hydratePersistedConfigIntoInputs() {
   }
   if (typeof persisted.fieldShape === "string") {
     fieldShapeInput.value = persisted.fieldShape;
+  }
+  if (typeof persisted.fieldSize === "string") {
+    fieldSizeInput.value = persisted.fieldSize;
   }
   if (typeof persisted.verticalPolarity === "string") {
     verticalPolarityInput.value = persisted.verticalPolarity;
@@ -1063,6 +1076,7 @@ function persistConfig(config) {
     rightDotIntensity: config.rightDotIntensity,
     vergenceMode: config.vergenceMode,
     fieldShape: config.fieldShape,
+    fieldSize: config.fieldSize,
     verticalPolarity: config.verticalPolarity,
     visualPreset: config.visualPreset,
     startPd: config.startPd,
@@ -1087,6 +1101,7 @@ function applyConfigInputs(config) {
   rightDotIntensityValueEl.textContent = config.rightDotIntensity.toFixed(2);
   vergenceModeInput.value = normalizeVergenceMode(config.vergenceMode);
   fieldShapeInput.value = normalizeFieldShape(config.fieldShape);
+  fieldSizeInput.value = normalizeFieldSize(config.fieldSize);
   verticalPolarityInput.value = normalizeVerticalPolarity(config.verticalPolarity);
   visualPresetInput.value = normalizeVisualPreset(config.visualPreset);
   startPdInput.value = String(config.startPd);
@@ -1233,6 +1248,7 @@ function setInputsDisabled(disabled) {
   sessionMinutesInput.disabled = disabled;
   roundSecondsInput.disabled = disabled;
   fieldShapeInput.disabled = disabled;
+  fieldSizeInput.disabled = disabled;
   verticalPolarityInput.disabled = disabled;
   leftDotIntensityInput.disabled = disabled;
   rightDotIntensityInput.disabled = disabled;
@@ -1258,6 +1274,7 @@ function applyConfigToState(config) {
   state.goalPd = config.goalPd;
   state.vergenceMode = config.vergenceMode;
   state.fieldShape = config.fieldShape;
+  state.fieldSize = config.fieldSize;
   state.verticalPolarity = config.verticalPolarity;
   state.visualPreset = config.visualPreset;
   state.visualTuning = getVisualPresetTuning(config.visualPreset);
@@ -1939,9 +1956,18 @@ function getFieldShape() {
   return normalizeFieldShape(state.fieldShape);
 }
 
-function getFieldExtent() {
+function normalizeFieldSize(value) {
+  if (FIELD_SIZE_VALUES.includes(value)) return value;
+  return DEFAULT_FIELD_SIZE_VALUE;
+}
+
+function getFieldExtentForSize(fieldSize) {
   const viewport = getCanvasMetrics();
-  return coreGetFieldExtent(viewport.cssWidth, viewport.cssHeight, 0.34);
+  return coreGetFieldExtent(viewport.cssWidth, viewport.cssHeight, FIELD_SIZE_RATIOS[normalizeFieldSize(fieldSize)]);
+}
+
+function getFieldExtent() {
+  return getFieldExtentForSize(state.fieldSize);
 }
 
 function getCanvasMetrics() {
@@ -2224,6 +2250,7 @@ function buildSessionHistoryRecord(reachedGoal) {
     endedAt: new Date().toISOString(),
     mode: normalizeVergenceMode(state.vergenceMode),
     visualPreset: state.visualPreset,
+    fieldSize: normalizeFieldSize(state.fieldSize),
     sessionMinutes: state.sessionDurationMs / 60_000,
     goalPd: state.goalPd,
     bestPd: state.bestPd,
@@ -2514,7 +2541,7 @@ function exportSessionHistoryCsv() {
   if (history.length === 0) return;
 
   const header = [
-    "endedAt", "mode", "visualPreset", "sessionMinutes", "goalPd", "bestPd", "reachedGoal",
+    "endedAt", "mode", "visualPreset", "fieldSize", "sessionMinutes", "goalPd", "bestPd", "reachedGoal",
     "totalScore", "rounds", "correct", "wrong", "timeouts", "skips", "suppressions",
     "bestBreakPd", "bestRecoveryPd", "facilityCycles", "facilityCpm"
   ];
@@ -2525,6 +2552,7 @@ function exportSessionHistoryCsv() {
       record.endedAt ?? "",
       record.mode ?? "",
       record.visualPreset ?? "",
+      record.fieldSize ?? "",
       record.sessionMinutes ?? "",
       record.goalPd ?? "",
       record.bestPd ?? "",
