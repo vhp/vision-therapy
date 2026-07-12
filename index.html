@@ -133,6 +133,16 @@
               <option value="standard">Standard (Up = red up)</option>
               <option value="flipped">Flipped (Up = blue up)</option>
             </select>
+            <label for="leftDotIntensity">Red Dot Intensity</label>
+            <div class="intensity-control">
+              <input id="leftDotIntensity" type="range" min="0.3" max="1" step="0.05" value="0.9" />
+              <span id="leftDotIntensityValue" class="intensity-value">0.90</span>
+            </div>
+            <label for="rightDotIntensity">Cyan Dot Intensity</label>
+            <div class="intensity-control">
+              <input id="rightDotIntensity" type="range" min="0.3" max="1" step="0.05" value="0.9" />
+              <span id="rightDotIntensityValue" class="intensity-value">0.90</span>
+            </div>
             <label for="lrSplit" class="readonly-label">Eye Split (px)</label>
             <input id="lrSplit" type="text" value="0 px" readonly />
           </div>
@@ -146,6 +156,11 @@
             <li><strong>Field Shape:</strong> changes only the outer stereogram field between `Circle` and `Square`.</li>
             <li class="debug-only"><strong>Debug Shortcuts:</strong> <kbd>[</kbd> or <kbd>-</kbd> / <kbd>_</kbd> for -1; <kbd>]</kbd> or <kbd>=</kbd> / <kbd>+</kbd> for +1. Works in fullscreen.</li>
             <li><strong>Vertical Mode Mapping:</strong> flips `Vergence Up` / `Vergence Down` polarity if clinical testing suggests the opposite convention.</li>
+            <li>
+              <strong>Dot Intensity:</strong> tunes anaglyph ghosting for your glasses.
+              With glasses on, close one eye at a time; if a color faintly shows
+              through the wrong lens, lower that color's intensity until it disappears.
+            </li>
             <li><strong>Eye Split:</strong> read-only rendering split shown for reference, with `H` or `V` axis tags.</li>
           </ul>
         </details>

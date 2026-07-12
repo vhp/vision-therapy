@@ -168,6 +168,26 @@ const SIDE_KEYS = {
 };
 const SIDES = ["up", "right", "down", "left"];
 const EXERCISE_LABEL = "Vergence Trainer";
+
+function parseRgbColor(colorText, fallback) {
+  const match = typeof colorText === "string"
+    ? colorText.match(/rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)(?:\s*,\s*([0-9.]+))?\s*\)/)
+    : null;
+  if (!match) return fallback;
+  return {
+    r: Number(match[1]),
+    g: Number(match[2]),
+    b: Number(match[3]),
+    a: match[4] !== undefined ? Number(match[4]) : 1
+  };
+}
+
+const LEFT_DOT_RGB = parseRgbColor(LEFT_DOT_COLOR, { r: 255, g: 70, b: 70, a: 0.9 });
+const RIGHT_DOT_RGB = parseRgbColor(RIGHT_DOT_COLOR, { r: 58, g: 197, b: 255, a: 0.9 });
+const MIN_DOT_INTENSITY = 0.3;
+const MAX_DOT_INTENSITY = 1;
+const DEFAULT_LEFT_DOT_INTENSITY = Math.min(MAX_DOT_INTENSITY, Math.max(MIN_DOT_INTENSITY, LEFT_DOT_RGB.a));
+const DEFAULT_RIGHT_DOT_INTENSITY = Math.min(MAX_DOT_INTENSITY, Math.max(MIN_DOT_INTENSITY, RIGHT_DOT_RGB.a));
 const URL_FLAGS = readUrlFlags();
 const DEBUG_MODE = URL_FLAGS.debug;
 const CLEAR_SAVED_CONFIG_ON_LOAD = URL_FLAGS.clearSettings;
@@ -202,6 +222,10 @@ const sessionMinutesInput = document.getElementById("sessionMinutes");
 const roundSecondsInput = document.getElementById("roundSeconds");
 const fieldShapeInput = document.getElementById("fieldShape");
 const verticalPolarityInput = document.getElementById("verticalPolarity");
+const leftDotIntensityInput = document.getElementById("leftDotIntensity");
+const leftDotIntensityValueEl = document.getElementById("leftDotIntensityValue");
+const rightDotIntensityInput = document.getElementById("rightDotIntensity");
+const rightDotIntensityValueEl = document.getElementById("rightDotIntensityValue");
 const lrSplitInput = document.getElementById("lrSplit");
 
 const summaryCardEl = document.getElementById("summaryCard");
@@ -251,6 +275,10 @@ if (
   !roundSecondsInput ||
   !fieldShapeInput ||
   !verticalPolarityInput ||
+  !leftDotIntensityInput ||
+  !leftDotIntensityValueEl ||
+  !rightDotIntensityInput ||
+  !rightDotIntensityValueEl ||
   !lrSplitInput
 ) {
   throw new Error("Training config input(s) missing.");
@@ -314,6 +342,8 @@ const state = {
   difficultySteps: 0,
   monitorWidthIn: DEFAULT_MONITOR_WIDTH_IN,
   viewDistanceIn: DEFAULT_VIEW_DISTANCE_IN,
+  leftDotIntensity: DEFAULT_LEFT_DOT_INTENSITY,
+  rightDotIntensity: DEFAULT_RIGHT_DOT_INTENSITY,
   correctCount: 0,
   wrongCount: 0,
   skipCount: 0,
@@ -400,6 +430,10 @@ sessionMinutesInput.addEventListener("change", onConfigChange);
 roundSecondsInput.addEventListener("change", onConfigChange);
 fieldShapeInput.addEventListener("change", onConfigChange);
 verticalPolarityInput.addEventListener("change", onConfigChange);
+leftDotIntensityInput.addEventListener("input", onConfigChange);
+leftDotIntensityInput.addEventListener("change", onConfigChange);
+rightDotIntensityInput.addEventListener("input", onConfigChange);
+rightDotIntensityInput.addEventListener("change", onConfigChange);
 
 window.addEventListener("keydown", onKeyDown);
 window.addEventListener("resize", queueViewportRefresh);
@@ -928,6 +962,12 @@ function readConfigInputs() {
 
   const monitorWidthIn = clampFloat(monitorWidthRaw, MIN_MONITOR_WIDTH_IN, MAX_MONITOR_WIDTH_IN, DEFAULT_MONITOR_WIDTH_IN);
   const viewDistanceIn = clampFloat(viewDistanceRaw, MIN_VIEW_DISTANCE_IN, MAX_VIEW_DISTANCE_IN, DEFAULT_VIEW_DISTANCE_IN);
+  const leftDotIntensity = clampFloat(
+    Number.parseFloat(leftDotIntensityInput.value), MIN_DOT_INTENSITY, MAX_DOT_INTENSITY, DEFAULT_LEFT_DOT_INTENSITY
+  );
+  const rightDotIntensity = clampFloat(
+    Number.parseFloat(rightDotIntensityInput.value), MIN_DOT_INTENSITY, MAX_DOT_INTENSITY, DEFAULT_RIGHT_DOT_INTENSITY
+  );
   const startPd = clampInt(startPdRaw, 0, ABSOLUTE_PD_MAX, DEFAULT_START_PD);
   const goalPd = clampInt(goalPdRaw, 1, ABSOLUTE_PD_MAX, DEFAULT_GOAL_PD);
   const sessionMinutes = clampInt(sessionMinutesRaw, 1, ABSOLUTE_SESSION_MINUTES_MAX, DEFAULT_SESSION_MINUTES);
@@ -936,6 +976,8 @@ function readConfigInputs() {
   return {
     monitorWidthIn,
     viewDistanceIn,
+    leftDotIntensity,
+    rightDotIntensity,
     vergenceMode,
     fieldShape,
     verticalPolarity,
@@ -956,6 +998,12 @@ function hydratePersistedConfigIntoInputs() {
   }
   if (Number.isFinite(persisted.viewDistanceIn)) {
     viewDistanceInput.value = String(persisted.viewDistanceIn);
+  }
+  if (Number.isFinite(persisted.leftDotIntensity)) {
+    leftDotIntensityInput.value = String(persisted.leftDotIntensity);
+  }
+  if (Number.isFinite(persisted.rightDotIntensity)) {
+    rightDotIntensityInput.value = String(persisted.rightDotIntensity);
   }
   if (typeof persisted.vergenceMode === "string") {
     vergenceModeInput.value = persisted.vergenceMode;
@@ -1011,6 +1059,8 @@ function persistConfig(config) {
     monitorWidthNeedsReconfirm: state.monitorWidthNeedsReconfirm,
     displayContext: state.confirmedDisplayContext,
     viewDistanceIn: config.viewDistanceIn,
+    leftDotIntensity: config.leftDotIntensity,
+    rightDotIntensity: config.rightDotIntensity,
     vergenceMode: config.vergenceMode,
     fieldShape: config.fieldShape,
     verticalPolarity: config.verticalPolarity,
@@ -1031,6 +1081,10 @@ function persistConfig(config) {
 function applyConfigInputs(config) {
   monitorWidthInput.value = formatInches(config.monitorWidthIn);
   viewDistanceInput.value = formatInches(config.viewDistanceIn);
+  leftDotIntensityInput.value = String(config.leftDotIntensity);
+  leftDotIntensityValueEl.textContent = config.leftDotIntensity.toFixed(2);
+  rightDotIntensityInput.value = String(config.rightDotIntensity);
+  rightDotIntensityValueEl.textContent = config.rightDotIntensity.toFixed(2);
   vergenceModeInput.value = normalizeVergenceMode(config.vergenceMode);
   fieldShapeInput.value = normalizeFieldShape(config.fieldShape);
   verticalPolarityInput.value = normalizeVerticalPolarity(config.verticalPolarity);
@@ -1180,6 +1234,8 @@ function setInputsDisabled(disabled) {
   roundSecondsInput.disabled = disabled;
   fieldShapeInput.disabled = disabled;
   verticalPolarityInput.disabled = disabled;
+  leftDotIntensityInput.disabled = disabled;
+  rightDotIntensityInput.disabled = disabled;
   lrSplitInput.disabled = false;
 }
 
@@ -1207,6 +1263,8 @@ function applyConfigToState(config) {
   state.visualTuning = getVisualPresetTuning(config.visualPreset);
   state.monitorWidthIn = config.monitorWidthIn;
   state.viewDistanceIn = config.viewDistanceIn;
+  state.leftDotIntensity = config.leftDotIntensity;
+  state.rightDotIntensity = config.rightDotIntensity;
   state.difficultySteps = pdToDifficultySteps(config.startPd, config.monitorWidthIn, config.viewDistanceIn);
   state.currentPd = difficultyToPd(state.difficultySteps, state.monitorWidthIn, state.viewDistanceIn);
   state.bestPd = state.currentPd;
@@ -1757,9 +1815,9 @@ function renderScene() {
 function drawSuppressionMarkers(context, cx, cy, extent) {
   const offset = extent * 1.12;
   const size = 5;
-  context.fillStyle = LEFT_DOT_COLOR;
+  context.fillStyle = getLeftDotColor();
   context.fillRect(cx - size / 2, cy - offset - size, size, size);
-  context.fillStyle = RIGHT_DOT_COLOR;
+  context.fillStyle = getRightDotColor();
   context.fillRect(cx - size / 2, cy + offset, size, size);
 }
 
@@ -1809,6 +1867,8 @@ function drawRandomDotStereoSquare(
   const maxShiftPerEye = Math.max(0, fieldExtent - (squareOffset + squareHalf + TARGET_EDGE_PADDING_PX));
   const shiftPerEyeX = Math.sign(rawShiftPerEyeX) * Math.min(Math.abs(rawShiftPerEyeX), maxShiftPerEye);
   const shiftPerEyeY = Math.sign(rawShiftPerEyeY) * Math.min(Math.abs(rawShiftPerEyeY), maxShiftPerEye);
+  const leftDotColor = getLeftDotColor();
+  const rightDotColor = getRightDotColor();
 
   for (let i = 0; i < dots.length; i += 1) {
     const dot = dots[i];
@@ -1841,9 +1901,9 @@ function drawRandomDotStereoSquare(
     // the surround instead; a scale of 1 keeps every dot at full alpha.
     context.globalAlpha = insideSquare ? 1 : 1 / targetPopAlphaScale;
 
-    context.fillStyle = LEFT_DOT_COLOR;
+    context.fillStyle = leftDotColor;
     context.fillRect(lx, ly, size, size);
-    context.fillStyle = RIGHT_DOT_COLOR;
+    context.fillStyle = rightDotColor;
     context.fillRect(rx, ry, size, size);
   }
 
@@ -1862,6 +1922,14 @@ function wrapInsideSquare(localX, squareHalf) {
   if (span <= 0) return localX;
   const normalized = ((localX + squareHalf) % span + span) % span;
   return normalized - squareHalf;
+}
+
+function getLeftDotColor() {
+  return `rgba(${LEFT_DOT_RGB.r}, ${LEFT_DOT_RGB.g}, ${LEFT_DOT_RGB.b}, ${state.leftDotIntensity})`;
+}
+
+function getRightDotColor() {
+  return `rgba(${RIGHT_DOT_RGB.r}, ${RIGHT_DOT_RGB.g}, ${RIGHT_DOT_RGB.b}, ${state.rightDotIntensity})`;
 }
 
 function getFieldShape() {

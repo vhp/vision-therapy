@@ -248,6 +248,26 @@ body.training-live .instructions {
   font-weight: 700;
 }
 
+.intensity-control {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.setup-grid .intensity-control input[type="range"] {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  accent-color: var(--accent);
+}
+
+.intensity-value {
+  min-width: 2.6em;
+  text-align: right;
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
 .monitor-width-controls {
   display: flex;
   flex-direction: column;

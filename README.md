@@ -64,6 +64,10 @@ Browser-based vergence training prototype using red/cyan anaglyph random-dot ste
 - If the app detects a display-context change (for example monitor resolution or device pixel ratio), monitor width must be reconfirmed before starting again.
 - `Field Shape` changes only the outer stereogram field between `Circle` and `Square`.
 - `Vertical Mode Mapping` lets you flip the `Vergence Up` / `Vergence Down` polarity if clinical testing suggests the opposite convention.
+- `Red Dot Intensity` / `Cyan Dot Intensity` tune anaglyph ghosting for your
+  glasses and monitor: with glasses on, close one eye at a time and lower the
+  color that faintly shows through the wrong lens until it disappears. Saved
+  with the rest of the settings.
 
 ## Pause UX
 
