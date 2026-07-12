@@ -162,6 +162,10 @@ const FIELD_SIZE_VALUES = Object.freeze(Object.keys(FIELD_SIZE_RATIOS));
 const DEFAULT_FIELD_SIZE_VALUE = "large";
 const DEFAULT_VERTICAL_POLARITY = "standard";
 const VERTICAL_POLARITY_VALUES = Object.freeze(["standard", "flipped"]);
+// Deliberately has no default: like Monitor Width, the red lens side is a
+// physical fact only the user can answer, and it decides the sign of every
+// horizontal demand. It stays unset until chosen and blocks session start.
+const RED_LENS_SIDE_VALUES = Object.freeze(["left", "right"]);
 
 const SIDE_KEYS = {
   ArrowUp: "up",
@@ -226,6 +230,7 @@ const roundSecondsInput = document.getElementById("roundSeconds");
 const fieldShapeInput = document.getElementById("fieldShape");
 const fieldSizeInput = document.getElementById("fieldSize");
 const verticalPolarityInput = document.getElementById("verticalPolarity");
+const redLensSideInput = document.getElementById("redLensSide");
 const leftDotIntensityInput = document.getElementById("leftDotIntensity");
 const leftDotIntensityValueEl = document.getElementById("leftDotIntensityValue");
 const rightDotIntensityInput = document.getElementById("rightDotIntensity");
@@ -280,6 +285,7 @@ if (
   !fieldShapeInput ||
   !fieldSizeInput ||
   !verticalPolarityInput ||
+  !redLensSideInput ||
   !leftDotIntensityInput ||
   !leftDotIntensityValueEl ||
   !rightDotIntensityInput ||
@@ -342,6 +348,7 @@ const state = {
   fieldShape: DEFAULT_FIELD_SHAPE_VALUE,
   fieldSize: DEFAULT_FIELD_SIZE_VALUE,
   verticalPolarity: DEFAULT_VERTICAL_POLARITY,
+  redLensSide: "",
   visualPreset: DEFAULT_VISUAL_PRESET_VALUE,
   visualTuning: DEFAULT_VISUAL_TUNING,
   roundVergence: DEFAULT_VERGENCE_MODE,
@@ -407,9 +414,10 @@ startBtn.addEventListener("click", async () => {
       focusMonitorWidthInput();
       return;
     }
-    if (!state.paused && !state.monitorWidthConfirmed) {
-      updateStatus(getMonitorWidthBlockedMessage(), true);
-      focusMonitorWidthInput();
+    const setupBlockedMessage = state.paused ? null : getSetupBlockedMessage();
+    if (setupBlockedMessage) {
+      updateStatus(setupBlockedMessage, true);
+      focusBlockedSetupInput();
       return;
     }
     ensureAudioContext();
@@ -437,6 +445,7 @@ roundSecondsInput.addEventListener("change", onConfigChange);
 fieldShapeInput.addEventListener("change", onConfigChange);
 fieldSizeInput.addEventListener("change", onConfigChange);
 verticalPolarityInput.addEventListener("change", onConfigChange);
+redLensSideInput.addEventListener("change", onConfigChange);
 leftDotIntensityInput.addEventListener("input", onConfigChange);
 leftDotIntensityInput.addEventListener("change", onConfigChange);
 rightDotIntensityInput.addEventListener("input", onConfigChange);
@@ -533,8 +542,9 @@ function resetSession() {
   syncSessionLayoutMode();
   hideSummaryCard();
 
-  if (!state.monitorWidthConfirmed) {
-    updateStatus(`Reset complete. ${getMonitorWidthBlockedMessage()}`, true);
+  const setupBlockedMessage = getSetupBlockedMessage();
+  if (setupBlockedMessage) {
+    updateStatus(`Reset complete. ${setupBlockedMessage}`, true);
   } else {
     updateStatus(
       `Reset complete. Press Start for ${config.sessionMinutes} min. Round ${config.roundSeconds}s, start ${formatPd(state.currentPd)}Δ, session target ${formatPd(config.goalPd)}Δ, mode ${formatVergenceLabel(config.vergenceMode)}, visual ${formatVisualPresetLabel(config.visualPreset)}.`
@@ -933,6 +943,7 @@ function initializeConfigInputs() {
   fieldShapeInput.value = DEFAULT_FIELD_SHAPE_VALUE;
   fieldSizeInput.value = DEFAULT_FIELD_SIZE_VALUE;
   verticalPolarityInput.value = DEFAULT_VERTICAL_POLARITY;
+  redLensSideInput.value = "";
 
   if (debugStatusEl) {
     debugStatusEl.hidden = !DEBUG_MODE;
@@ -963,6 +974,7 @@ function readConfigInputs() {
   const fieldShape = normalizeFieldShape(fieldShapeInput.value);
   const fieldSize = normalizeFieldSize(fieldSizeInput.value);
   const verticalPolarity = normalizeVerticalPolarity(verticalPolarityInput.value);
+  const redLensSide = normalizeRedLensSide(redLensSideInput.value);
   const visualPreset = normalizeVisualPreset(visualPresetInput.value);
   const startPdRaw = DEBUG_MODE ? Number.parseInt(startPdInput.value, 10) : DEFAULT_START_PD;
   const goalPdRaw = Number.parseInt(goalPdInput.value, 10);
@@ -991,6 +1003,7 @@ function readConfigInputs() {
     fieldShape,
     fieldSize,
     verticalPolarity,
+    redLensSide,
     visualPreset,
     startPd,
     goalPd,
@@ -1026,6 +1039,9 @@ function hydratePersistedConfigIntoInputs() {
   }
   if (typeof persisted.verticalPolarity === "string") {
     verticalPolarityInput.value = persisted.verticalPolarity;
+  }
+  if (RED_LENS_SIDE_VALUES.includes(persisted.redLensSide)) {
+    redLensSideInput.value = persisted.redLensSide;
   }
   if (typeof persisted.visualPreset === "string") {
     visualPresetInput.value = persisted.visualPreset;
@@ -1078,6 +1094,7 @@ function persistConfig(config) {
     fieldShape: config.fieldShape,
     fieldSize: config.fieldSize,
     verticalPolarity: config.verticalPolarity,
+    redLensSide: config.redLensSide,
     visualPreset: config.visualPreset,
     startPd: config.startPd,
     goalPd: config.goalPd,
@@ -1103,6 +1120,7 @@ function applyConfigInputs(config) {
   fieldShapeInput.value = normalizeFieldShape(config.fieldShape);
   fieldSizeInput.value = normalizeFieldSize(config.fieldSize);
   verticalPolarityInput.value = normalizeVerticalPolarity(config.verticalPolarity);
+  redLensSideInput.value = normalizeRedLensSide(config.redLensSide);
   visualPresetInput.value = normalizeVisualPreset(config.visualPreset);
   startPdInput.value = String(config.startPd);
   goalPdInput.value = String(config.goalPd);
@@ -1182,11 +1200,31 @@ function getMonitorWidthBlockedMessage() {
   return "Reconfirm Monitor Width in Advanced Settings before starting because the display context changed.";
 }
 
+function getSetupBlockedMessage() {
+  if (!state.monitorWidthConfirmed) return getMonitorWidthBlockedMessage();
+  if (!isRedLensSideChosen()) {
+    return "Choose Red Lens Side in Advanced Settings before starting: pick which eye your glasses' red lens covers. This is saved for future sessions.";
+  }
+  return null;
+}
+
+function focusBlockedSetupInput() {
+  if (!state.monitorWidthConfirmed) {
+    focusMonitorWidthInput();
+    return;
+  }
+  if (advancedSetupEl instanceof HTMLDetailsElement) {
+    advancedSetupEl.open = true;
+  }
+  redLensSideInput.focus();
+}
+
 function syncMonitorWidthSetupUi() {
   const needsWidth = !state.monitorWidthConfirmed;
+  const needsSetup = needsWidth || !isRedLensSideChosen();
   if (advancedSetupEl instanceof HTMLDetailsElement) {
-    advancedSetupEl.classList.toggle("needs-attention", needsWidth);
-    if (needsWidth) {
+    advancedSetupEl.classList.toggle("needs-attention", needsSetup);
+    if (needsSetup) {
       advancedSetupEl.open = true;
     }
   }
@@ -1200,8 +1238,9 @@ function updateReadyStatus(config) {
     `start ${formatPd(state.currentPd)}Δ, session target ${formatPd(config.goalPd)}Δ, ` +
     `mode ${formatVergenceLabel(config.vergenceMode)}, visual ${formatVisualPresetLabel(config.visualPreset)}.`;
 
-  if (!state.monitorWidthConfirmed) {
-    updateStatus(`${getMonitorWidthBlockedMessage()} ${readyText}`, true);
+  const setupBlockedMessage = getSetupBlockedMessage();
+  if (setupBlockedMessage) {
+    updateStatus(`${setupBlockedMessage} ${readyText}`, true);
     return;
   }
 
@@ -1250,6 +1289,7 @@ function setInputsDisabled(disabled) {
   fieldShapeInput.disabled = disabled;
   fieldSizeInput.disabled = disabled;
   verticalPolarityInput.disabled = disabled;
+  redLensSideInput.disabled = disabled;
   leftDotIntensityInput.disabled = disabled;
   rightDotIntensityInput.disabled = disabled;
   lrSplitInput.disabled = false;
@@ -1276,6 +1316,7 @@ function applyConfigToState(config) {
   state.fieldShape = config.fieldShape;
   state.fieldSize = config.fieldSize;
   state.verticalPolarity = config.verticalPolarity;
+  state.redLensSide = config.redLensSide;
   state.visualPreset = config.visualPreset;
   state.visualTuning = getVisualPresetTuning(config.visualPreset);
   state.monitorWidthIn = config.monitorWidthIn;
@@ -1580,6 +1621,14 @@ function normalizeVerticalPolarity(value) {
   return DEFAULT_VERTICAL_POLARITY;
 }
 
+function normalizeRedLensSide(value) {
+  return RED_LENS_SIDE_VALUES.includes(value) ? value : "";
+}
+
+function isRedLensSideChosen() {
+  return RED_LENS_SIDE_VALUES.includes(redLensSideInput.value);
+}
+
 function normalizeVisualPreset(value) {
   if (VISUAL_PRESET_MAP.has(value)) return value;
   return DEFAULT_VISUAL_PRESET_VALUE;
@@ -1717,8 +1766,12 @@ function getVerticalPolaritySign() {
 
 function getVergenceVector(roundVergence) {
   // Vertical modes use symmetric vertical disparity. The polarity is user-selectable so
-  // clinical testing can choose whether "up" means red/left up or the opposite.
-  return coreGetVergenceVector(normalizeExerciseKey(roundVergence), normalizeVerticalPolarity(state.verticalPolarity));
+  // clinical testing can choose whether "up" means red up or the opposite.
+  return coreGetVergenceVector(
+    normalizeExerciseKey(roundVergence),
+    normalizeVerticalPolarity(state.verticalPolarity),
+    normalizeRedLensSide(state.redLensSide)
+  );
 }
 
 function formatVergenceLabel(mode) {
@@ -2251,6 +2304,7 @@ function buildSessionHistoryRecord(reachedGoal) {
     mode: normalizeVergenceMode(state.vergenceMode),
     visualPreset: state.visualPreset,
     fieldSize: normalizeFieldSize(state.fieldSize),
+    redLensSide: normalizeRedLensSide(state.redLensSide),
     sessionMinutes: state.sessionDurationMs / 60_000,
     goalPd: state.goalPd,
     bestPd: state.bestPd,
@@ -2541,7 +2595,7 @@ function exportSessionHistoryCsv() {
   if (history.length === 0) return;
 
   const header = [
-    "endedAt", "mode", "visualPreset", "fieldSize", "sessionMinutes", "goalPd", "bestPd", "reachedGoal",
+    "endedAt", "mode", "visualPreset", "fieldSize", "redLensSide", "sessionMinutes", "goalPd", "bestPd", "reachedGoal",
     "totalScore", "rounds", "correct", "wrong", "timeouts", "skips", "suppressions",
     "bestBreakPd", "bestRecoveryPd", "facilityCycles", "facilityCpm"
   ];
@@ -2553,6 +2607,7 @@ function exportSessionHistoryCsv() {
       record.mode ?? "",
       record.visualPreset ?? "",
       record.fieldSize ?? "",
+      record.redLensSide ?? "",
       record.sessionMinutes ?? "",
       record.goalPd ?? "",
       record.bestPd ?? "",

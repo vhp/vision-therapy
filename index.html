@@ -134,6 +134,18 @@
               <option value="medium">Medium</option>
               <option value="small">Small (Harder)</option>
             </select>
+            <label
+              for="redLensSide"
+              class="has-tooltip"
+              title="Look at your anaglyph glasses: which eye is behind the red lens? This sets the convergence/divergence direction, so it must be answered once before starting. Saved in this browser."
+            >
+              Red Lens Side
+            </label>
+            <select id="redLensSide">
+              <option value="" disabled hidden>Choose left or right</option>
+              <option value="left">Left eye</option>
+              <option value="right">Right eye</option>
+            </select>
             <label for="verticalPolarity">Vertical Mode Mapping</label>
             <select id="verticalPolarity">
               <option value="standard">Standard (Up = red up)</option>
@@ -162,6 +174,12 @@
             <li><strong>Field Shape:</strong> changes only the outer stereogram field between `Circle` and `Square`.</li>
             <li><strong>Field Size:</strong> shrinks the whole stereogram field. A smaller field gives less peripheral fusion support, making the task harder.</li>
             <li class="debug-only"><strong>Debug Shortcuts:</strong> <kbd>[</kbd> or <kbd>-</kbd> / <kbd>_</kbd> for -1; <kbd>]</kbd> or <kbd>=</kbd> / <kbd>+</kbd> for +1. Works in fullscreen.</li>
+            <li>
+              <strong>Red Lens Side:</strong> must be answered once before the first
+              session; saved afterward. Self-test: in Convergence mode the fused
+              field should float in front of the screen; if it sinks behind,
+              pick the other side.
+            </li>
             <li><strong>Vertical Mode Mapping:</strong> flips `Vergence Up` / `Vergence Down` polarity if clinical testing suggests the opposite convention.</li>
             <li>
               <strong>Dot Intensity:</strong> tunes anaglyph ghosting for your glasses.

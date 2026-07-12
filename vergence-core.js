@@ -77,10 +77,21 @@
     return verticalPolarity === "flipped" ? -1 : 1;
   }
 
-  function getVergenceVector(roundVergence, verticalPolarity) {
+  // Which eye sits behind the red lens decides the sign of horizontal
+  // disparity: red-drawn dots are seen by that eye, so swapping the lens side
+  // swaps crossed and uncrossed disparity. Red-right matches the historical
+  // rendering; red-left (the common retail convention) flips it. Vertical
+  // modes are unaffected because their polarity setting is defined relative
+  // to the red image, not an eye.
+  function getRedLensHorizontalSign(redLensSide) {
+    return redLensSide === "left" ? -1 : 1;
+  }
+
+  function getVergenceVector(roundVergence, verticalPolarity, redLensSide) {
     const normalized = typeof roundVergence === "string" ? roundVergence.trim().toLowerCase() : "";
+    const horizontalSign = getRedLensHorizontalSign(redLensSide);
     if (normalized === "divergence") {
-      return { x: -1, y: 0 };
+      return { x: -horizontalSign, y: 0 };
     }
     if (normalized === "vergence_up") {
       return { x: 0, y: getVerticalPolaritySign(verticalPolarity) };
@@ -88,7 +99,7 @@
     if (normalized === "vergence_down") {
       return { x: 0, y: -getVerticalPolaritySign(verticalPolarity) };
     }
-    return { x: 1, y: 0 };
+    return { x: horizontalSign, y: 0 };
   }
 
   function getTotalSplitPx(difficultySteps, baseTotalSplitPx, splitGainPxPerStep) {

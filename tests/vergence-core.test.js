@@ -49,6 +49,15 @@ test("vergence vectors respect axis and vertical polarity", () => {
   assert.deepEqual(core.getVergenceVector("vergence_down", "flipped"), { x: 0, y: 1 });
 });
 
+test("red lens side flips horizontal disparity but not vertical", () => {
+  assert.deepEqual(core.getVergenceVector("convergence", "standard", "right"), { x: 1, y: 0 });
+  assert.deepEqual(core.getVergenceVector("divergence", "standard", "right"), { x: -1, y: 0 });
+  assert.deepEqual(core.getVergenceVector("convergence", "standard", "left"), { x: -1, y: 0 });
+  assert.deepEqual(core.getVergenceVector("divergence", "standard", "left"), { x: 1, y: 0 });
+  assert.deepEqual(core.getVergenceVector("vergence_up", "standard", "left"), { x: 0, y: 1 });
+  assert.deepEqual(core.getVergenceVector("vergence_down", "flipped", "left"), { x: 0, y: 1 });
+});
+
 test("difficulty and PD conversions round trip", () => {
   const monitorWidthIn = 24;
   const viewDistanceIn = 16;

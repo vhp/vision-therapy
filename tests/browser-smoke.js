@@ -520,6 +520,9 @@ async function runModeScenario(scenario) {
   await setMonitorWidth(frameWindow, frameDocument, 24);
   recordResult("pass", `${scenario.label}: monitor width confirmed`);
 
+  await setSelectValue(frameWindow, frameDocument, "redLensSide", "left", "redLensSide");
+  recordResult("pass", `${scenario.label}: red lens side chosen`);
+
   await setSelectValue(frameWindow, frameDocument, "vergenceMode", scenario.vergenceMode, "vergenceMode");
   await setSelectValue(frameWindow, frameDocument, "fieldShape", scenario.fieldShape, "fieldShape");
   await setSelectValue(frameWindow, frameDocument, "verticalPolarity", scenario.verticalPolarity, "verticalPolarity");

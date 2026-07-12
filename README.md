@@ -67,6 +67,11 @@ Browser-based vergence training prototype using red/cyan anaglyph random-dot ste
 - `Field Size` shrinks the whole stereogram field (`Large` / `Medium` /
   `Small`). A smaller field gives less peripheral fusion support and is
   harder, like the small-shape option in commercial vergence software.
+- `Red Lens Side` asks which eye your glasses' red lens covers, which decides
+  the convergence/divergence direction. Like `Monitor Width` it starts unset,
+  must be answered before the first session, and is then cached in the
+  browser. Self-test: in Convergence mode the fused field should float in
+  front of the screen; if it sinks behind, pick the other side.
 - `Vertical Mode Mapping` lets you flip the `Vergence Up` / `Vergence Down` polarity if clinical testing suggests the opposite convention.
 - `Red Dot Intensity` / `Cyan Dot Intensity` tune anaglyph ghosting for your
   glasses and monitor: with glasses on, close one eye at a time and lower the
