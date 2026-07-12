@@ -1578,6 +1578,24 @@ function pauseSessionByUser(message) {
 
 function resumeSession() {
   if (!state.paused) return;
+
+  // The display can change while paused (moved to another monitor, zoom).
+  // Resuming would train the rest of the session on stale calibration, so end
+  // it here, keep the work already recorded, and force a reconfirm before the
+  // next start.
+  if (detectDisplayContextChange()) {
+    clearPendingNextRound();
+    state.resumeStartsNextRound = false;
+    state.running = true;
+    state.paused = false;
+    state.pausedAtTs = 0;
+    state.nowTs = performance.now();
+    endSession();
+    syncMonitorWidthSetupUi();
+    updateStatus(`Session ended: ${getMonitorWidthBlockedMessage()}`, true);
+    return;
+  }
+
   const resumeStartsNextRound = state.resumeStartsNextRound;
   clearPendingNextRound();
   state.resumeStartsNextRound = false;

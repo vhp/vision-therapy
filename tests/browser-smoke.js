@@ -30,6 +30,16 @@ const MODE_SCENARIOS = [
     verifyResetDuringTimeoutTransition: true
   },
   {
+    label: "Convergence / Resume After Display Change",
+    vergenceMode: "convergence",
+    fieldShape: "square",
+    verticalPolarity: "standard",
+    expectedInitialExercises: ["Convergence"],
+    expectedNextExercises: ["Convergence"],
+    expectedAxis: "H",
+    verifyResumeDisplayChange: true
+  },
+  {
     label: "Divergence / Circle",
     vergenceMode: "divergence",
     fieldShape: "circle",
@@ -512,6 +522,36 @@ async function verifyResetDuringTimeoutTransition(frameDocument, debugStatusEl) 
   }
 }
 
+async function verifyResumeDisplayChange(frameWindow, frameDocument, startBtn) {
+  dispatchKey(frameWindow, "KeyP", "p");
+  await waitFor("pause for display-change test", () => {
+    const pauseCard = frameDocument.getElementById("pauseCard");
+    return !pauseCard.hidden && startBtn.textContent === "Resume";
+  });
+
+  const changedDpr = (frameWindow.devicePixelRatio || 1) + 0.5;
+  try {
+    Object.defineProperty(frameWindow, "devicePixelRatio", { configurable: true, value: changedDpr });
+  } catch {
+    frameWindow.devicePixelRatio = changedDpr;
+  }
+
+  dispatchKey(frameWindow, "KeyP", "p");
+  await waitFor("session ends on resume after display change", () => {
+    const statusText = String(frameDocument.getElementById("status")?.textContent || "");
+    return startBtn.textContent === "Start" && startBtn.disabled === false && statusText.includes("Session ended");
+  });
+
+  const confirmBtn = frameDocument.getElementById("monitorWidthConfirmBtn");
+  if (confirmBtn.hidden) {
+    throw new Error("Display-change resume failed: reconfirm control did not reappear");
+  }
+  const statusText = String(frameDocument.getElementById("status")?.textContent || "");
+  if (!statusText.toLowerCase().includes("monitor width")) {
+    throw new Error(`Display-change resume failed: status did not prompt reconfirm, got "${statusText}"`);
+  }
+}
+
 async function runModeScenario(scenario) {
   const { frameWindow, frameDocument } = await bootFreshApp();
   recordResult("pass", `${scenario.label}: app loaded`);
@@ -561,6 +601,12 @@ async function runModeScenario(scenario) {
   if (scenario.verifyResetDuringTimeoutTransition) {
     await verifyResetDuringTimeoutTransition(frameDocument, debugStatusEl);
     recordResult("pass", `${scenario.label}: reset during timeout transition verified`);
+    return;
+  }
+
+  if (scenario.verifyResumeDisplayChange) {
+    await verifyResumeDisplayChange(frameWindow, frameDocument, startBtn);
+    recordResult("pass", `${scenario.label}: resume after display change ends session`);
     return;
   }
 
