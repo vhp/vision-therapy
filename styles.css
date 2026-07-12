@@ -272,7 +272,6 @@ body.training-live .instructions {
   font-size: 0.75rem;
   font-weight: 400;
   line-height: 1.4;
-  white-space: normal;
   z-index: 6;
   opacity: 0;
   visibility: hidden;
