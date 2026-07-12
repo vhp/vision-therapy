@@ -1806,19 +1806,22 @@ function renderScene() {
     trainingActive
   );
   if (trainingActive) {
-    drawSuppressionMarkers(ctx, cx, cy, fieldGeometry.extent);
+    drawSuppressionMarkers(ctx, leftEyeCenter, rightEyeCenter, fieldGeometry.extent);
   }
 }
 
-// One marker per eye channel, outside the fused field: if either fades from
-// view, that eye is suppressing and the user reports it with S.
-function drawSuppressionMarkers(context, cx, cy, extent) {
-  const offset = extent * 1.12;
-  const size = 5;
+// One marker per eye channel, just above/below the fused center so they sit in
+// view without breaking fixation. Anchored to each eye's field center and kept
+// at 0.25 * extent, inside the target squares' inner edge at 0.32 * extent, so
+// they never overlap an up/down target. If either fades, that eye is
+// suppressing and the user reports it with S.
+function drawSuppressionMarkers(context, leftEyeCenter, rightEyeCenter, extent) {
+  const offset = extent * 0.25;
+  const size = 6;
   context.fillStyle = getLeftDotColor();
-  context.fillRect(cx - size / 2, cy - offset - size, size, size);
+  context.fillRect(leftEyeCenter.x - size / 2, leftEyeCenter.y - offset - size / 2, size, size);
   context.fillStyle = getRightDotColor();
-  context.fillRect(cx - size / 2, cy + offset, size, size);
+  context.fillRect(rightEyeCenter.x - size / 2, rightEyeCenter.y + offset - size / 2, size, size);
 }
 
 function drawStereoFieldGlow(context, leftEyeCenter, rightEyeCenter, fieldGeometry) {

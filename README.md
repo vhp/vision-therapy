@@ -30,9 +30,10 @@ Browser-based vergence training prototype using red/cyan anaglyph random-dot ste
 - Target is disparity-encoded in one of four directions (`up`, `right`, `down`, `left`).
 - `Arrow keys` = choose target side.
 - `Space` = cannot see target (`-1`, new round).
-- Two vigilance dots sit above and below the field, one per eye channel. If
-  either fades, that eye is suppressing: `S` reports it (score unchanged,
-  demand drops, new round). Suppression counts appear in the session summary.
+- Two vigilance dots sit just above and below the fused center, one per eye
+  channel, close enough to watch without leaving fixation. If either fades,
+  that eye is suppressing: `S` reports it (score unchanged, demand drops, new
+  round). Suppression counts appear in the session summary.
 - `P` = pause/resume.
 - `Esc` exits fullscreen and pauses.
 - Leaving the tab/window auto-pauses the session so timing does not keep running in the background.
