@@ -18,6 +18,7 @@ const MODE_SCENARIOS = [
     verifyFocusLossPause: true,
     verifyTimeoutGuard: true,
     verifyTimeoutPauseResume: true,
+    verifyResizeDuringPause: true,
     suppressionDemandText: "Demand reduced"
   },
   {
@@ -538,6 +539,50 @@ async function verifyResetDuringTimeoutTransition(frameDocument, debugStatusEl) 
   }
 }
 
+function clockToSeconds(text) {
+  const match = /^(\d+):(\d+)$/.exec(String(text || "").trim());
+  if (!match) return NaN;
+  return Number(match[1]) * 60 + Number(match[2]);
+}
+
+async function verifyResizeDuringPause(frameWindow, frameDocument, startBtn) {
+  const sessionTimerEl = frameDocument.getElementById("sessionTimer");
+
+  dispatchKey(frameWindow, "KeyP", "p");
+  await waitFor("pause for resize test", () => {
+    const pauseCard = frameDocument.getElementById("pauseCard");
+    return !pauseCard.hidden && startBtn.textContent === "Resume";
+  });
+  const secondsAtPause = clockToSeconds(sessionTimerEl.textContent);
+
+  // Stay paused a real interval, then bump the app's clock the way a stray
+  // interaction while paused does: a resize (viewport refresh) and, since this
+  // frame runs in debug mode, a debug difficulty key. Both write state.nowTs;
+  // the clock and resume math must ignore it and use the pause timestamp.
+  await delay(2500);
+  const EventCtor = frameWindow.Event || Event;
+  frameWindow.dispatchEvent(new EventCtor("resize"));
+  if (frameWindow.visualViewport) {
+    frameWindow.visualViewport.dispatchEvent(new EventCtor("resize"));
+  }
+  dispatchKey(frameWindow, "BracketRight", "]");
+  await delay(200);
+
+  const secondsWhilePaused = clockToSeconds(sessionTimerEl.textContent);
+  if (Math.abs(secondsWhilePaused - secondsAtPause) > 1) {
+    throw new Error(`Interaction during pause moved the frozen clock: ${secondsAtPause}s -> ${secondsWhilePaused}s`);
+  }
+
+  dispatchKey(frameWindow, "KeyP", "p");
+  await waitFor("resume after pause-interaction test", () =>
+    startBtn.disabled === true && startBtn.textContent === "Running...");
+
+  const secondsAfterResume = clockToSeconds(sessionTimerEl.textContent);
+  if (secondsAtPause - secondsAfterResume > 1) {
+    throw new Error(`Paused time was lost on resume: ${secondsAtPause}s at pause, ${secondsAfterResume}s after resume`);
+  }
+}
+
 async function verifySuppressionMessage(frameWindow, frameDocument, expectedFragment) {
   const statusEl = frameDocument.getElementById("status");
   dispatchKey(frameWindow, "KeyS", "s");
@@ -784,6 +829,11 @@ async function runModeScenario(scenario) {
   if (scenario.verifyFocusLossPause) {
     await verifyFocusLossPause(frameWindow, frameDocument, startBtn);
     recordResult("pass", `${scenario.label}: focus-loss auto-pause verified`);
+  }
+
+  if (scenario.verifyResizeDuringPause) {
+    await verifyResizeDuringPause(frameWindow, frameDocument, startBtn);
+    recordResult("pass", `${scenario.label}: resize during pause keeps the clock frozen`);
   }
 
   await stopScenarioSession(frameDocument);
