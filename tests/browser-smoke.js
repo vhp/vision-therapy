@@ -17,7 +17,8 @@ const MODE_SCENARIOS = [
     verifyPauseResume: true,
     verifyFocusLossPause: true,
     verifyTimeoutGuard: true,
-    verifyTimeoutPauseResume: true
+    verifyTimeoutPauseResume: true,
+    suppressionDemandText: "Demand reduced"
   },
   {
     label: "Convergence / Reset During Timeout Transition",
@@ -73,7 +74,8 @@ const MODE_SCENARIOS = [
     verticalPolarity: "standard",
     expectedInitialExercises: ["Convergence"],
     expectedNextExercises: ["Divergence"],
-    expectedAxis: "H"
+    expectedAxis: "H",
+    suppressionDemandText: "Demand held"
   },
   {
     label: "Vergence Up / Square",
@@ -536,6 +538,18 @@ async function verifyResetDuringTimeoutTransition(frameDocument, debugStatusEl) 
   }
 }
 
+async function verifySuppressionMessage(frameWindow, frameDocument, expectedFragment) {
+  const statusEl = frameDocument.getElementById("status");
+  dispatchKey(frameWindow, "KeyS", "s");
+  await waitFor("suppression status", () =>
+    String(statusEl.textContent || "").includes("Suppression reported"));
+
+  const text = String(statusEl.textContent || "");
+  if (!text.includes(expectedFragment)) {
+    throw new Error(`Suppression message: expected "${expectedFragment}", got "${text}"`);
+  }
+}
+
 async function verifyResumeDisplayChange(frameWindow, frameDocument, startBtn) {
   dispatchKey(frameWindow, "KeyP", "p");
   await waitFor("pause for display-change test", () => {
@@ -756,6 +770,11 @@ async function runModeScenario(scenario) {
     throw new Error(`${scenario.label}: expected Eye Split axis ${scenario.expectedAxis} after round advance`);
   }
   recordResult("pass", `${scenario.label}: round advance verified`);
+
+  if (scenario.suppressionDemandText) {
+    await verifySuppressionMessage(frameWindow, frameDocument, scenario.suppressionDemandText);
+    recordResult("pass", `${scenario.label}: suppression message verified`);
+  }
 
   if (scenario.verifyPauseResume) {
     await verifyPauseResume(frameWindow, frameDocument, startBtn);

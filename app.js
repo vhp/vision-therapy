@@ -741,8 +741,9 @@ function onKeyDown(event) {
     const pdDelta = isFacilityMode() ? 0 : applyPdDelta(-PD_LOSS_PER_ERROR);
     setRoundDebugState("suppression", "s", state.targetSide, pdDelta);
     playNegativeFeedbackBeep();
+    const demandText = isFacilityMode() ? "Demand held at the fixed pair." : "Demand reduced.";
     updateStatus(
-      `Suppression reported (${formatExerciseLabel(suppressionScore.exerciseKey)}). Demand reduced. Blink and refocus; both marker dots should stay visible.`,
+      `Suppression reported (${formatExerciseLabel(suppressionScore.exerciseKey)}). ${demandText} Blink and refocus; both marker dots should stay visible.`,
       true
     );
     updateHud();
