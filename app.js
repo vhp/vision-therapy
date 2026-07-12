@@ -27,6 +27,7 @@ const {
   recordScoringEvent: coreRecordScoringEvent,
   getExerciseScore: coreGetExerciseScore,
   clampDifficultySteps: coreClampDifficultySteps,
+  csvEscapeField: coreCsvEscapeField,
   advanceStaircase: coreAdvanceStaircase,
   recordRangeBreak: coreRecordRangeBreak,
   recordRangeRecovery: coreRecordRangeRecovery,
@@ -907,15 +908,16 @@ function endSession() {
 
   const reachedGoal = state.bestPd >= state.goalPd;
   showSummaryCard(reachedGoal);
-  appendSessionHistoryRecord(buildSessionHistoryRecord(reachedGoal));
+  const historySaved = appendSessionHistoryRecord(buildSessionHistoryRecord(reachedGoal));
   renderSessionHistory();
 
+  const saveWarning = historySaved ? "" : " History could not be saved (browser storage is full or blocked).";
   if (reachedGoal) {
     beep(1080, 130);
-    updateStatus(`Session complete. Target met: best ${formatPd(state.bestPd)}Δ (target ${formatPd(state.goalPd)}Δ).`);
+    updateStatus(`Session complete. Target met: best ${formatPd(state.bestPd)}Δ (target ${formatPd(state.goalPd)}Δ).${saveWarning}`, !historySaved);
   } else {
     beep(660, 140);
-    updateStatus(`Session complete. Target not met: best ${formatPd(state.bestPd)}Δ (target ${formatPd(state.goalPd)}Δ).`, true);
+    updateStatus(`Session complete. Target not met: best ${formatPd(state.bestPd)}Δ (target ${formatPd(state.goalPd)}Δ).${saveWarning}`, true);
   }
 
   updateHud();
@@ -2397,9 +2399,12 @@ function appendSessionHistoryRecord(record) {
     const history = readSessionHistory();
     history.push(record);
     const trimmed = history.slice(-Math.max(1, HISTORY_MAX_ENTRIES));
-    window.localStorage?.setItem(HISTORY_STORAGE_KEY, JSON.stringify(trimmed));
+    if (!window.localStorage) return false;
+    window.localStorage.setItem(HISTORY_STORAGE_KEY, JSON.stringify(trimmed));
+    return true;
   } catch {
-    // Ignore storage errors (privacy mode, quota, blocked storage).
+    // Storage full or blocked (privacy mode). Caller warns the user.
+    return false;
   }
 }
 
@@ -2418,9 +2423,18 @@ function clearSessionHistoryWithConfirm() {
 function getRecordBestRange(record) {
   const ranges = Array.isArray(record.ranges) ? record.ranges : [];
   return ranges.reduce(
-    (best, entry) => (Number.isFinite(entry?.breakPd) && (!best || entry.breakPd > best.breakPd) ? entry : best),
+    (best, entry) => (
+      Number.isFinite(entry?.breakPd) && Number.isFinite(entry?.recoveryPd) &&
+      (!best || entry.breakPd > best.breakPd) ? entry : best
+    ),
     null
   );
+}
+
+// Saved records are untrusted (hand-edited files, corrupt storage). Reject any
+// PD outside the sane range so a value like 1e12 can't blow up the chart scale.
+function sanitizeRecordPd(value) {
+  return Number.isFinite(value) && value >= 0 && value <= ABSOLUTE_PD_MAX ? value : null;
 }
 
 function formatHistoryDate(isoText) {
@@ -2448,7 +2462,7 @@ function renderSessionHistory() {
     const cells = [
       formatHistoryDate(record.endedAt),
       formatVergenceLabel(record.mode),
-      Number.isFinite(record.bestPd) ? `${formatPd(record.bestPd)}Δ` : "-",
+      sanitizeRecordPd(record.bestPd) !== null ? `${formatPd(sanitizeRecordPd(record.bestPd))}Δ` : "-",
       bestRange ? `${formatPd(bestRange.breakPd)}/${formatPd(bestRange.recoveryPd)}Δ` : "-",
       String(record.totalScore ?? "-"),
       String(record.rounds ?? "-"),
@@ -2472,8 +2486,8 @@ function getTrendData() {
       const bestRange = getRecordBestRange(record);
       return {
         endedAt: record.endedAt,
-        bestPd: Number.isFinite(record.bestPd) ? record.bestPd : null,
-        breakPd: bestRange ? bestRange.breakPd : null
+        bestPd: sanitizeRecordPd(record.bestPd),
+        breakPd: bestRange ? sanitizeRecordPd(bestRange.breakPd) : null
       };
     });
 }
@@ -2659,7 +2673,7 @@ function exportSessionHistoryCsv() {
     "totalScore", "rounds", "correct", "wrong", "timeouts", "skips", "suppressions",
     "bestBreakPd", "bestRecoveryPd", "facilityCycles", "facilityCpm"
   ];
-  const lines = [header.join(",")];
+  const lines = [header.map(coreCsvEscapeField).join(",")];
   for (const record of history) {
     const bestRange = getRecordBestRange(record);
     lines.push([
@@ -2683,7 +2697,7 @@ function exportSessionHistoryCsv() {
       bestRange ? bestRange.recoveryPd : "",
       record.facility?.cycles ?? "",
       record.facility?.cpm ?? ""
-    ].join(","));
+    ].map(coreCsvEscapeField).join(","));
   }
   downloadTextFile("vergence-trainer-history.csv", "text/csv", lines.join("\n"));
 }

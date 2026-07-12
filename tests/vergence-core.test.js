@@ -182,6 +182,22 @@ test("break/recovery pairs track per exercise", () => {
   assert.equal(core.recordRangeBreak(tracker, "convergence", Number.NaN), false);
 });
 
+test("csv fields are quoted and formula-guarded without mangling numbers", () => {
+  assert.equal(core.csvEscapeField("convergence"), "convergence");
+  assert.equal(core.csvEscapeField(""), "");
+  assert.equal(core.csvEscapeField(null), "");
+  assert.equal(core.csvEscapeField(undefined), "");
+  assert.equal(core.csvEscapeField(-3), "-3");
+  assert.equal(core.csvEscapeField(12.5), "12.5");
+  assert.equal(core.csvEscapeField("a,b"), '"a,b"');
+  assert.equal(core.csvEscapeField('a"b'), '"a""b"');
+  assert.equal(core.csvEscapeField("line1\nline2"), '"line1\nline2"');
+  assert.equal(core.csvEscapeField("=SUM(A1)"), "'=SUM(A1)");
+  assert.equal(core.csvEscapeField("+cmd"), "'+cmd");
+  assert.equal(core.csvEscapeField("@formula"), "'@formula");
+  assert.equal(core.csvEscapeField("=1+2,3"), '"\'=1+2,3"');
+});
+
 test("difficulty steps clamp to the allowed range", () => {
   assert.equal(core.clampDifficultySteps(-2, 50), 0);
   assert.equal(core.clampDifficultySteps(12.5, 50), 12.5);

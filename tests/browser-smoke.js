@@ -283,7 +283,21 @@ function assertOneOf(actual, expectedValues, label) {
   throw new Error(`${label}: expected one of [${expectedValues.join(", ")}], got ${actual || "(missing)"}`);
 }
 
+const HISTORY_STORAGE_KEY = "vergence_trainer.history.v1";
+
+// Session history lives in the app frame's own localStorage, which persists
+// across same-origin reloads of the frame. Clearing it before each boot keeps
+// scenarios from inheriting records left by a session that ran to completion.
+function clearFrameSessionHistory() {
+  try {
+    appFrame.contentWindow?.localStorage?.removeItem(HISTORY_STORAGE_KEY);
+  } catch {
+    // No accessible frame yet, or storage blocked; nothing to clear.
+  }
+}
+
 async function bootFreshApp() {
+  clearFrameSessionHistory();
   await loadFrame();
 
   let frameWindow;
@@ -552,6 +566,52 @@ async function verifyResumeDisplayChange(frameWindow, frameDocument, startBtn) {
   }
 }
 
+async function verifyCorruptHistoryBoots() {
+  const corrupt = [
+    {
+      endedAt: new Date(600000).toISOString(),
+      mode: "convergence", bestPd: 20, totalScore: 5, rounds: 10, suppressions: 0,
+      ranges: [{ exercise: "convergence", breakPd: 24 }]
+    },
+    {
+      endedAt: new Date(1200000).toISOString(),
+      mode: "convergence", bestPd: 1e12, totalScore: 3, rounds: 8, suppressions: 1, ranges: []
+    },
+    "not an object",
+    { ranges: "bad", bestPd: "x" }
+  ];
+
+  // Boot once so the frame exists, seed its own storage, then reload so the app
+  // reads the corrupt records at startup.
+  const boot = await bootFreshApp();
+  boot.frameWindow.localStorage.setItem(HISTORY_STORAGE_KEY, JSON.stringify(corrupt));
+  try {
+    await loadFrame();
+    const frameDocument = appFrame.contentWindow.document;
+    await waitFor("app boot with corrupt history", () => {
+      const startBtn = frameDocument.getElementById("startBtn");
+      const vergenceModeInput = frameDocument.getElementById("vergenceMode");
+      return startBtn && vergenceModeInput && vergenceModeInput.options.length > 0;
+    });
+
+    // Three of the four seeded entries are objects and must each render a row.
+    // A crash on the break-without-recovery record aborts the loop mid-render,
+    // leaving fewer rows; a freeze on bestPd 1e12 hangs the boot wait above.
+    const rowCount = frameDocument.getElementById("historyTableBody").children.length;
+    if (rowCount !== 3) {
+      throw new Error(`Corrupt history: expected 3 rendered rows, got ${rowCount}`);
+    }
+    // refreshIdlePreview runs after the history render; a status message proves
+    // startup completed past it rather than aborting on a bad record.
+    const statusText = String(frameDocument.getElementById("status")?.textContent || "");
+    if (statusText.trim() === "") {
+      throw new Error("Corrupt history: startup did not complete after rendering history");
+    }
+  } finally {
+    clearFrameSessionHistory();
+  }
+}
+
 async function runModeScenario(scenario) {
   const { frameWindow, frameDocument } = await bootFreshApp();
   recordResult("pass", `${scenario.label}: app loaded`);
@@ -640,6 +700,9 @@ async function runSmokeSuite() {
   recordResult("pass", "Starting smoke suite");
   let suiteError = null;
   try {
+    await verifyCorruptHistoryBoots();
+    recordResult("pass", "Corrupt history boots and renders safely");
+
     for (const scenario of MODE_SCENARIOS) {
       await runModeScenario(scenario);
     }

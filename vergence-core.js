@@ -205,6 +205,22 @@
     return Math.min(maxSteps, Math.max(0, steps));
   }
 
+  // Escapes one CSV field: quotes when it holds a comma/quote/newline, and
+  // guards against spreadsheet formula injection by prefixing a quote to
+  // strings that begin with =, +, -, @ (skipping plain numbers so real
+  // negatives survive).
+  function csvEscapeField(value) {
+    let text = value === null || value === undefined ? "" : String(value);
+    const isPlainNumber = /^-?\d+(?:\.\d+)?$/.test(text);
+    if (!isPlainNumber && /^[=+\-@\t\r]/.test(text)) {
+      text = `'${text}`;
+    }
+    if (/[",\n\r]/.test(text)) {
+      text = `"${text.replace(/"/g, '""')}"`;
+    }
+    return text;
+  }
+
   // Break/recovery tracking mirrors clinical fusional range measurement: a
   // break is the demand where fusion is reported lost, the recovery is the
   // demand where the next correct response lands for the same exercise.
@@ -352,6 +368,7 @@
     recordScoringEvent,
     getExerciseScore,
     clampDifficultySteps,
+    csvEscapeField,
     advanceStaircase,
     recordRangeBreak,
     recordRangeRecovery,
