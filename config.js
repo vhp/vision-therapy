@@ -31,8 +31,7 @@ window.APP_CONFIG = Object.freeze({
 
   BASE_TOTAL_SPLIT_PX: 8,
   SPLIT_GAIN_PX_PER_STEP: 7,
-  BACKGROUND_SPLIT_RATIO: 0.52,
-  SQUARE_SPLIT_RATIO: 0.48,
+  TARGET_SPLIT_PX: 12,
 
   INITIAL_DOT_COUNT: 5000,
   ROUND_DOT_COUNT: 8200,
@@ -55,8 +54,7 @@ window.APP_CONFIG = Object.freeze({
       value: "balanced",
       label: "Balanced (Default)",
       tuning: {
-        backgroundSplitRatio: 0.52,
-        squareSplitRatio: 0.48,
+        targetSplitPx: 12,
         targetPopSizePx: 0,
         targetPopAlphaScale: 1.0,
         dotMediumThreshold: 0.68,
@@ -70,8 +68,7 @@ window.APP_CONFIG = Object.freeze({
       value: "obvious",
       label: "More Obvious",
       tuning: {
-        backgroundSplitRatio: 0.48,
-        squareSplitRatio: 0.52,
+        targetSplitPx: 16,
         targetPopSizePx: 0,
         targetPopAlphaScale: 1.0,
         dotMediumThreshold: 0.58,
@@ -85,8 +82,7 @@ window.APP_CONFIG = Object.freeze({
       value: "fine",
       label: "Fine Dots (Harder)",
       tuning: {
-        backgroundSplitRatio: 0.56,
-        squareSplitRatio: 0.44,
+        targetSplitPx: 8,
         targetPopSizePx: 0,
         targetPopAlphaScale: 1.0,
         dotMediumThreshold: 0.86,

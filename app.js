@@ -73,8 +73,7 @@ const {
   MAX_VIEW_DISTANCE_IN,
   BASE_TOTAL_SPLIT_PX,
   SPLIT_GAIN_PX_PER_STEP,
-  BACKGROUND_SPLIT_RATIO,
-  SQUARE_SPLIT_RATIO,
+  TARGET_SPLIT_PX = 12,
   TARGET_OFFSET_RATIO = 0.52,
   TARGET_HALF_SIZE_RATIO = 0.2,
   TARGET_EDGE_PADDING_PX = 2,
@@ -123,8 +122,7 @@ const DEFAULT_VERGENCE_MODE = VERGENCE_MODE_MAP.has("convergence")
   : VERGENCE_MODES[0].value;
 
 const FALLBACK_VISUAL_PRESET_TUNING = Object.freeze({
-  backgroundSplitRatio: BACKGROUND_SPLIT_RATIO,
-  squareSplitRatio: SQUARE_SPLIT_RATIO,
+  targetSplitPx: TARGET_SPLIT_PX,
   targetPopSizePx: TARGET_POP_SIZE_PX,
   targetPopAlphaScale: TARGET_POP_ALPHA_SCALE,
   dotMediumThreshold: DOT_MEDIUM_THRESHOLD,
@@ -1248,7 +1246,7 @@ function updateReadyStatus(config) {
 }
 
 function getCurrentTotalSplitPx() {
-  return getBackgroundDisparity(state.difficultySteps) + getSquareDisparity(state.difficultySteps);
+  return getBackgroundDisparity(state.difficultySteps);
 }
 
 function getDisplayRoundVergence() {
@@ -1707,17 +1705,7 @@ function normalizeVisualPresetConfig(preset) {
   const label = typeof preset?.label === "string" && preset.label.trim() ? preset.label : value;
   const source = preset?.tuning && typeof preset.tuning === "object" ? preset.tuning : {};
 
-  let backgroundSplitRatio = sanitizePresetFloat(source.backgroundSplitRatio, 0.05, 0.95, BACKGROUND_SPLIT_RATIO);
-  let squareSplitRatio = sanitizePresetFloat(source.squareSplitRatio, 0.05, 0.95, SQUARE_SPLIT_RATIO);
-  const ratioTotal = backgroundSplitRatio + squareSplitRatio;
-  if (ratioTotal > 0) {
-    backgroundSplitRatio /= ratioTotal;
-    squareSplitRatio /= ratioTotal;
-  } else {
-    backgroundSplitRatio = BACKGROUND_SPLIT_RATIO;
-    squareSplitRatio = SQUARE_SPLIT_RATIO;
-  }
-
+  const targetSplitPx = sanitizePresetFloat(source.targetSplitPx, 2, 40, TARGET_SPLIT_PX);
   const targetPopSizePx = sanitizePresetInt(source.targetPopSizePx, 0, 6, TARGET_POP_SIZE_PX);
   const targetPopAlphaScale = sanitizePresetFloat(source.targetPopAlphaScale, 1, 1.35, TARGET_POP_ALPHA_SCALE);
   const dotMediumThreshold = sanitizePresetFloat(source.dotMediumThreshold, 0, 1, DOT_MEDIUM_THRESHOLD);
@@ -1739,8 +1727,7 @@ function normalizeVisualPresetConfig(preset) {
     value,
     label,
     tuning: Object.freeze({
-      backgroundSplitRatio,
-      squareSplitRatio,
+      targetSplitPx,
       targetPopSizePx,
       targetPopAlphaScale,
       dotMediumThreshold,
@@ -1825,14 +1812,16 @@ function getTotalSplitPx(difficultySteps) {
   return coreGetTotalSplitPx(difficultySteps, BASE_TOTAL_SPLIT_PX, SPLIT_GAIN_PX_PER_STEP);
 }
 
+// The background field split carries the entire vergence demand; the target
+// square rides on top with a small fixed relative disparity so it stays
+// equally detectable at every demand instead of dissolving into wrap noise at
+// high demand and vanishing at low demand.
 function getBackgroundDisparity(difficultySteps) {
-  const ratio = state.visualTuning?.backgroundSplitRatio ?? BACKGROUND_SPLIT_RATIO;
-  return getTotalSplitPx(difficultySteps) * ratio;
+  return getTotalSplitPx(difficultySteps);
 }
 
-function getSquareDisparity(difficultySteps) {
-  const ratio = state.visualTuning?.squareSplitRatio ?? SQUARE_SPLIT_RATIO;
-  return getTotalSplitPx(difficultySteps) * ratio;
+function getSquareDisparity() {
+  return state.visualTuning?.targetSplitPx ?? TARGET_SPLIT_PX;
 }
 
 function renderScene() {
@@ -1850,7 +1839,7 @@ function renderScene() {
   drawBackdrop(ctx, w, h);
 
   const backgroundDisparity = getBackgroundDisparity(state.difficultySteps);
-  const squareDisparity = getSquareDisparity(state.difficultySteps);
+  const squareDisparity = getSquareDisparity();
   const leftEyeCenter = {
     x: cx - backgroundDisparity * 0.5 * vergenceVector.x,
     y: cy - backgroundDisparity * 0.5 * vergenceVector.y

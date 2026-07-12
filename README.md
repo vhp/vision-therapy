@@ -119,6 +119,12 @@ When paused (for example after `Esc`):
 ## Notes
 
 - PD displayed here is an estimate based on monitor width, viewing distance, and pixel disparity.
+- The vergence work all lives in the background dot field: as demand rises,
+  the red and cyan copies of the field slide further apart. The floating
+  target square is different: its red and cyan copies stay a small fixed
+  number of screen pixels apart (`targetSplitPx`, set per visual preset).
+  That fixed offset is what makes the square float, and because it never
+  changes, the square is just as easy to spot at high demand as at low.
 - The canvas backing store now tracks the rendered canvas size so the displayed vergence demand is not distorted by CSS scaling.
 - `Eye split` is a rendering metric shown as read-only in `Advanced Settings` and in the pause box; it now includes an `H` or `V` axis tag.
 - This project is a prototype, not a medical device.
