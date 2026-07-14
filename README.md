@@ -56,9 +56,11 @@ Browser-based vergence training prototype using red/cyan anaglyph random-dot ste
   Convergence and the mixed jump modes keep the wide generic limit.
 - Scoring: correct = `+1`; wrong / timeout / space = `-1`.
 - Demand follows a 3-down/1-up staircase: three consecutive correct answers raise
-  demand by `PD_GAIN_PER_CORRECT`; any error lowers it by `PD_LOSS_PER_ERROR`.
-  This converges near 79% accuracy, so the demand estimate reflects a real
-  threshold instead of answer streak luck.
+  demand by `PD_GAIN_PER_CORRECT` (0.75Δ); any error lowers it by
+  `PD_LOSS_PER_ERROR` (1Δ). With these steps the demand settles where the user
+  answers about 83% of rounds correctly, so the estimate reflects a real
+  threshold instead of answer streak luck. The slightly larger down-step is
+  deliberate: after a struggle, relief comes faster than the climb.
 - `Space` also records a break point at the current demand; the next correct
   answer in the same exercise records the recovery point. The best
   break/recovery pair per exercise appears in the session summary, mirroring
@@ -123,8 +125,11 @@ When paused (for example after `Esc`):
   - `Vergence Facility (3Δ / 12Δ)`: jumps between a fixed easy divergence
     demand and a hard convergence demand (`FACILITY_BASE_IN_PD` /
     `FACILITY_BASE_OUT_PD` in config.js). The pair advances only on correct
-    answers and demand never drifts. Scored in cycles per minute like the
-    clinical prism-flipper facility test; the adult norm is about 15 cpm.
+    answers and demand never drifts. Scored in cycles per minute. Note the
+    number is not comparable to prism-flipper norms: a flipper only asks you
+    to clear the print, while each phase here requires finding a random-dot
+    target and pressing an arrow, which takes extra seconds. Track your own
+    trend rather than comparing to published flipper figures.
   - `Smooth Vergence (Ramp)`: convergence demand rises slowly and continuously
     (`SMOOTH_RAMP_PD_PER_SEC` in config.js) while you keep the target fused,
     rather than stepping on each answer. Press `Space` when it splits; the
