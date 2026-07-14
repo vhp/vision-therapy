@@ -675,6 +675,13 @@ async function verifyRangeDescent(frameWindow, frameDocument, debugStatusEl) {
     return Number(d.total) === totalBefore - 1 &&
       String(statusEl.textContent || "").includes("Descending");
   });
+
+  // Letting the round time out while the break is still pending is also a
+  // score-free descent step, not a scored timeout.
+  await waitFor("timeout during descent stays score-free", () => {
+    const d = parseDebugStatus(debugStatusEl.textContent);
+    return d.event === "rangeDescent" && d.input === "-" && Number(d.total) === totalBefore - 1;
+  }, 9000);
 }
 
 async function verifySuppressionMessage(frameWindow, frameDocument, expectedFragment) {

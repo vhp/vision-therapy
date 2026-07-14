@@ -493,9 +493,9 @@ fieldShapeInput.addEventListener("change", onConfigChange);
 fieldSizeInput.addEventListener("change", onConfigChange);
 verticalPolarityInput.addEventListener("change", onConfigChange);
 redLensSideInput.addEventListener("change", onConfigChange);
-leftDotIntensityInput.addEventListener("input", onConfigChange);
+leftDotIntensityInput.addEventListener("input", onIntensityPreview);
 leftDotIntensityInput.addEventListener("change", onConfigChange);
-rightDotIntensityInput.addEventListener("input", onConfigChange);
+rightDotIntensityInput.addEventListener("input", onIntensityPreview);
 rightDotIntensityInput.addEventListener("change", onConfigChange);
 
 window.addEventListener("keydown", onKeyDown);
@@ -603,6 +603,22 @@ function resetSession() {
   renderScene();
 }
 
+// Dot intensity only affects the draw-time color, so dragging the slider just
+// updates the live readout and repaints. The full config pass (which persists
+// and rebuilds the dot field) runs once on release via the change event.
+function onIntensityPreview() {
+  if (state.running || state.paused) return;
+  state.leftDotIntensity = clampFloat(
+    Number.parseFloat(leftDotIntensityInput.value), MIN_DOT_INTENSITY, MAX_DOT_INTENSITY, DEFAULT_LEFT_DOT_INTENSITY
+  );
+  state.rightDotIntensity = clampFloat(
+    Number.parseFloat(rightDotIntensityInput.value), MIN_DOT_INTENSITY, MAX_DOT_INTENSITY, DEFAULT_RIGHT_DOT_INTENSITY
+  );
+  leftDotIntensityValueEl.textContent = state.leftDotIntensity.toFixed(2);
+  rightDotIntensityValueEl.textContent = state.rightDotIntensity.toFixed(2);
+  renderScene();
+}
+
 function onConfigChange(event) {
   if (state.running || state.paused) return;
   if (event?.target === monitorWidthInput) {
@@ -653,7 +669,9 @@ function refreshViewport() {
   state.dots = buildDotField(getCurrentDotCount(), getFieldExtent(), state.roundSeed || 1001, state.visualTuning);
   updateHud();
   renderScene();
-  renderSessionTrend();
+  // A viewport change never alters session data, so reuse the cached trend data
+  // rather than re-reading storage on every resize frame.
+  renderSessionTrend(null, trendModel ? trendModel.data : null);
 }
 
 function getCurrentDotCount() {
@@ -746,6 +764,14 @@ function handleRoundTimeout() {
     setRoundDebugState("catchTimeout", "-", "-", 0);
     beep(660, 120);
     updateStatus("No target that round. Nothing to report.");
+  } else if (isRangeEligibleMode() && coreHasPendingRangeBreak(state.vergenceRanges, state.roundVergence)) {
+    // Running the clock out during the break-recovery descent is the same
+    // "still can't fuse" as a Space press here, so step demand down score-free
+    // rather than logging a penalized timeout mid-measurement.
+    const pdDelta = applyErrorDemandDrop();
+    setRoundDebugState("rangeDescent", "-", state.targetSide, pdDelta);
+    beep(500, 70);
+    updateStatus(`Descending: now ${formatPd(state.currentPd)}Δ. Answer the target when you can fuse it again.`);
   } else {
     const timeoutScore = recordScoringEvent("timeout", state.roundVergence);
     state.staircaseStreak = 0;
@@ -1000,13 +1026,19 @@ function endSession() {
   setStartButtonLabel();
   syncSessionLayoutMode();
 
-  const reachedGoal = state.bestPd >= state.goalPd;
+  const facility = isFacilityMode();
+  const reachedGoal = !facility && state.bestPd >= state.goalPd;
   showSummaryCard(reachedGoal, elapsedMs);
   const historySaved = appendSessionHistoryRecord(buildSessionHistoryRecord(reachedGoal, elapsedMs));
   renderSessionHistory();
 
   const saveWarning = historySaved ? "" : " History could not be saved (browser storage is full or blocked).";
-  if (reachedGoal) {
+  if (facility) {
+    // Facility is scored on cycles per minute, not a PD target, so completing
+    // it is a neutral success rather than a met/not-met verdict.
+    beep(1080, 130);
+    updateStatus(`Facility session complete: ${getFacilityCycles()} cycles (${getFacilityCpm().toFixed(1)} cpm).${saveWarning}`, !historySaved);
+  } else if (reachedGoal) {
     beep(1080, 130);
     updateStatus(`Session complete. Target met: best ${formatPd(state.bestPd)}Δ (target ${formatPd(state.goalPd)}Δ).${saveWarning}`, !historySaved);
   } else {
@@ -2574,7 +2606,11 @@ function hideSummaryCard() {
 }
 
 function showSummaryCard(reachedGoal, elapsedMs = state.sessionDurationMs) {
-  sumResultEl.textContent = reachedGoal ? "Target Met" : "Target Not Met";
+  // Facility has no PD target; its result is switching speed, so it never shows
+  // a met/not-met verdict.
+  sumResultEl.textContent = isFacilityMode()
+    ? `Facility: ${getFacilityCpm().toFixed(1)} cpm`
+    : reachedGoal ? "Target Met" : "Target Not Met";
   sumBestPdEl.textContent = `${formatPd(state.bestPd)}Δ`;
   sumGoalPdEl.textContent = `${formatPd(state.goalPd)}Δ`;
   sumScoreEl.textContent = String(state.score);
@@ -2668,9 +2704,11 @@ function clearSessionHistoryWithConfirm() {
 
 function getRecordBestRange(record) {
   const ranges = Array.isArray(record.ranges) ? record.ranges : [];
+  // Only consider in-range entries, so one corrupt oversized break cannot win
+  // the reduce and then get dropped downstream, hiding a valid smaller range.
   return ranges.reduce(
     (best, entry) => (
-      Number.isFinite(entry?.breakPd) && Number.isFinite(entry?.recoveryPd) &&
+      sanitizeRecordPd(entry?.breakPd) !== null && sanitizeRecordPd(entry?.recoveryPd) !== null &&
       (!best || entry.breakPd > best.breakPd) ? entry : best
     ),
     null
@@ -2728,14 +2766,15 @@ function renderSessionHistory() {
     historyTableBodyEl.append(row);
   }
 
-  renderSessionTrend();
+  renderSessionTrend(null, deriveTrendData(history));
 }
 
-function getTrendData() {
-  // Debug sessions can start at an arbitrary demand, so keep them out of the
-  // progress trend; they still appear in the table (marked) and exports.
-  return readSessionHistory()
-    .filter(record => record.debug !== true)
+// Debug sessions can start at an arbitrary demand, and facility has no PD
+// threshold (its bestPd is pinned low), so both are kept off the progress
+// trend; they still appear in the table and exports.
+function deriveTrendData(records) {
+  return records
+    .filter(record => record.debug !== true && normalizeVergenceMode(record.mode) !== "facility")
     .slice(-TREND_MAX_SESSIONS)
     .map(record => {
       const bestRange = getRecordBestRange(record);
@@ -2745,6 +2784,10 @@ function getTrendData() {
         breakPd: bestRange ? sanitizeRecordPd(bestRange.breakPd) : null
       };
     });
+}
+
+function getTrendData() {
+  return deriveTrendData(readSessionHistory());
 }
 
 function pickTrendTickStep(maxValue) {
@@ -2901,7 +2944,7 @@ function onTrendHover(event) {
 
 function onTrendHoverEnd() {
   historyTrendTooltipEl.hidden = true;
-  renderSessionTrend();
+  renderSessionTrend(null, trendModel ? trendModel.data : null);
 }
 
 function downloadTextFile(filename, mimeType, content) {
