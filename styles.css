@@ -257,7 +257,7 @@ body.training-live .instructions {
   text-underline-offset: 3px;
 }
 
-.setup-grid label.has-tooltip::before {
+.setup-grid label.has-tooltip[data-tip]::before {
   content: attr(data-tip);
   white-space: pre-line;
   position: absolute;
@@ -279,13 +279,60 @@ body.training-live .instructions {
   transition: opacity 120ms ease;
 }
 
-.setup-grid label.has-tooltip:hover::before {
+.setup-grid label.has-tooltip[data-tip]:hover::before {
   opacity: 1;
   visibility: visible;
 }
 
-.setup-grid label.tip-wide::before {
-  width: 300px;
+/* Structured tooltip for the mode picker: built by JS from the same data as
+   the dropdown, so names, grouping, and order always match it. */
+.mode-tip-panel {
+  display: block;
+  position: absolute;
+  left: 0;
+  top: calc(100% + 6px);
+  width: 330px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px solid #44576c;
+  background: #0f1722;
+  color: #d8e4f0;
+  font-size: 0.75rem;
+  font-weight: 400;
+  line-height: 1.45;
+  z-index: 6;
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transition: opacity 120ms ease;
+}
+
+.setup-grid label.has-tooltip:hover .mode-tip-panel {
+  opacity: 1;
+  visibility: visible;
+}
+
+.mode-tip-group {
+  display: block;
+  margin: 9px 0 3px;
+  font-size: 0.66rem;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: #7f93a8;
+}
+
+.mode-tip-group:first-child {
+  margin-top: 0;
+}
+
+.mode-tip-item {
+  display: block;
+  margin-bottom: 4px;
+  padding-left: 10px;
+}
+
+.mode-tip-item strong {
+  color: #f0f5fa;
 }
 
 .setup-grid label.has-tooltip::after {

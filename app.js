@@ -242,6 +242,7 @@ const advancedSetupEl = document.querySelector(".advanced-setup");
 const setupNeededBadgeEl = document.getElementById("setupNeededBadge");
 const setupChecklistEl = document.getElementById("setupChecklist");
 const vergenceModeDescriptionEl = document.getElementById("vergenceModeDescription");
+const vergenceModeTipPanelEl = document.getElementById("vergenceModeTipPanel");
 
 const monitorWidthInput = document.getElementById("monitorWidth");
 const monitorWidthConfirmBtn = document.getElementById("monitorWidthConfirmBtn");
@@ -321,7 +322,8 @@ if (
   !lrSplitInput ||
   !setupNeededBadgeEl ||
   !setupChecklistEl ||
-  !vergenceModeDescriptionEl
+  !vergenceModeDescriptionEl ||
+  !vergenceModeTipPanelEl
 ) {
   throw new Error("Training config input(s) missing.");
 }
@@ -1023,6 +1025,7 @@ function initializeConfigInputs() {
   viewDistanceInput.value = String(DEFAULT_VIEW_DISTANCE_IN);
 
   populateVergenceModeInput();
+  populateVergenceModeTipPanel();
   populateVisualPresetInput();
 
   startPdInput.min = "0";
@@ -1911,6 +1914,41 @@ function getVergenceModeGroupLabel(modeValue) {
     return "Vertical / Doctor Directed";
   }
   return "";
+}
+
+// Builds the mode tooltip from the same list, labels, and grouping as the
+// dropdown, in the same first-seen group order, so the two can never disagree.
+function populateVergenceModeTipPanel() {
+  vergenceModeTipPanelEl.replaceChildren();
+
+  const groups = new Map();
+  for (const mode of VERGENCE_MODES) {
+    const groupLabel = getVergenceModeGroupLabel(mode.value) || "Other";
+    if (!groups.has(groupLabel)) {
+      groups.set(groupLabel, []);
+    }
+    groups.get(groupLabel).push(mode);
+  }
+
+  for (const [groupLabel, modes] of groups) {
+    const heading = document.createElement("span");
+    heading.className = "mode-tip-group";
+    heading.textContent = groupLabel;
+    vergenceModeTipPanelEl.append(heading);
+
+    for (const mode of modes) {
+      const item = document.createElement("span");
+      item.className = "mode-tip-item";
+      const name = document.createElement("strong");
+      name.textContent = `${mode.label}.`;
+      item.append(name);
+      const description = VERGENCE_MODE_DESCRIPTIONS[mode.value];
+      if (description) {
+        item.append(` ${description}`);
+      }
+      vergenceModeTipPanelEl.append(item);
+    }
+  }
 }
 
 function populateVergenceModeInput() {

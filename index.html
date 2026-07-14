@@ -50,17 +50,10 @@
         </div>
 
         <div class="setup-grid core-setup">
-          <label
-            for="vergenceMode"
-            class="has-tooltip tip-wide"
-            data-tip="- Convergence: eyes turn inward. Builds the reserve used for near work like reading.
-- Divergence: eyes relax outward. Trains control for distance viewing.
-- Alternating: swaps direction every round. Trains flexibility between the two.
-- Random: unpredictable direction each round, so you cannot anticipate.
-- Facility: jumps between a fixed easy/hard pair, scored in cycles per minute. Trains switching speed.
-- Smooth: convergence demand climbs slowly while you hold fusion. Trains smooth (tonic) vergence.
-- Vergence Up/Down: vertical alignment work. Doctor-directed only."
-          >Vergence Mode</label>
+          <label for="vergenceMode" class="has-tooltip">
+            Vergence Mode
+            <span id="vergenceModeTipPanel" class="mode-tip-panel"></span>
+          </label>
           <select id="vergenceMode"></select>
           <p id="vergenceModeDescription" class="mode-description"></p>
           <label
