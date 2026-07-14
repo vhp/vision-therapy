@@ -981,18 +981,19 @@ function endSession() {
 
   clearPendingNextRound();
   state.resumeStartsNextRound = false;
+  state.nowTs = performance.now();
+  const elapsedMs = Math.min(state.sessionDurationMs, getSessionElapsedMs());
   state.running = false;
   state.paused = false;
   state.pausedAtTs = 0;
   stopRoundTicker();
-  state.nowTs = performance.now();
   setInputsDisabled(false);
   setStartButtonLabel();
   syncSessionLayoutMode();
 
   const reachedGoal = state.bestPd >= state.goalPd;
-  showSummaryCard(reachedGoal);
-  const historySaved = appendSessionHistoryRecord(buildSessionHistoryRecord(reachedGoal));
+  showSummaryCard(reachedGoal, elapsedMs);
+  const historySaved = appendSessionHistoryRecord(buildSessionHistoryRecord(reachedGoal, elapsedMs));
   renderSessionHistory();
 
   const saveWarning = historySaved ? "" : " History could not be saved (browser storage is full or blocked).";
@@ -1777,10 +1778,15 @@ function resumeSession() {
   if (detectDisplayContextChange()) {
     clearPendingNextRound();
     state.resumeStartsNextRound = false;
+    const now = performance.now();
+    const pausedAt = state.pausedAtTs > 0 ? state.pausedAtTs : state.nowTs;
+    // Re-anchor the session end as a normal resume would, so the elapsed time
+    // endSession records reflects training time, not the pause.
+    state.sessionEndTs = now + Math.max(0, state.sessionEndTs - pausedAt);
     state.running = true;
     state.paused = false;
     state.pausedAtTs = 0;
-    state.nowTs = performance.now();
+    state.nowTs = now;
     endSession();
     syncMonitorWidthSetupUi();
     updateStatus(`Session ended: ${getMonitorWidthBlockedMessage()}`, true);
@@ -2525,7 +2531,7 @@ function hideSummaryCard() {
   summaryCardEl.classList.add("hidden");
 }
 
-function showSummaryCard(reachedGoal) {
+function showSummaryCard(reachedGoal, elapsedMs = state.sessionDurationMs) {
   sumResultEl.textContent = reachedGoal ? "Target Met" : "Target Not Met";
   sumBestPdEl.textContent = `${formatPd(state.bestPd)}Δ`;
   sumGoalPdEl.textContent = `${formatPd(state.goalPd)}Δ`;
@@ -2536,7 +2542,7 @@ function showSummaryCard(reachedGoal) {
     ? `${getFacilityCycles()} cycles, ${getFacilityCpm().toFixed(1)} cpm`
     : "-";
   sumRoundsEl.textContent = String(state.round);
-  sumDurationEl.textContent = formatClock(state.sessionDurationMs);
+  sumDurationEl.textContent = formatClock(elapsedMs);
   sumCorrectEl.textContent = String(state.correctCount);
   sumWrongEl.textContent = String(state.wrongCount);
   sumTimeoutsEl.textContent = String(state.timeoutCount);
@@ -2548,7 +2554,7 @@ function showSummaryCard(reachedGoal) {
   summaryCardEl.classList.remove("hidden");
 }
 
-function buildSessionHistoryRecord(reachedGoal) {
+function buildSessionHistoryRecord(reachedGoal, elapsedMs = state.sessionDurationMs) {
   const ranges = Object.keys(state.vergenceRanges)
     .map(key => ({ exercise: key, pair: coreGetBestRangePair(state.vergenceRanges, key) }))
     .filter(entry => entry.pair)
@@ -2562,6 +2568,7 @@ function buildSessionHistoryRecord(reachedGoal) {
     fieldSize: normalizeFieldSize(state.fieldSize),
     redLensSide: normalizeRedLensSide(state.redLensSide),
     sessionMinutes: state.sessionDurationMs / 60_000,
+    elapsedMinutes: Math.round(elapsedMs / 6_000) / 10,
     goalPd: state.goalPd,
     bestPd: state.bestPd,
     reachedGoal,
@@ -2878,7 +2885,7 @@ function exportSessionHistoryCsv() {
   if (history.length === 0) return;
 
   const header = [
-    "endedAt", "debug", "mode", "visualPreset", "fieldSize", "redLensSide", "sessionMinutes", "goalPd", "bestPd", "reachedGoal",
+    "endedAt", "debug", "mode", "visualPreset", "fieldSize", "redLensSide", "sessionMinutes", "elapsedMinutes", "goalPd", "bestPd", "reachedGoal",
     "totalScore", "rounds", "correct", "wrong", "timeouts", "skips", "suppressions",
     "catchTotal", "catchFalseAlarm", "catchTimeout", "bestBreakPd", "bestRecoveryPd", "facilityCycles", "facilityCpm"
   ];
@@ -2893,6 +2900,7 @@ function exportSessionHistoryCsv() {
       record.fieldSize ?? "",
       record.redLensSide ?? "",
       record.sessionMinutes ?? "",
+      record.elapsedMinutes ?? "",
       record.goalPd ?? "",
       record.bestPd ?? "",
       record.reachedGoal ?? "",
