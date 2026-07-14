@@ -43,6 +43,13 @@ Browser-based vergence training prototype using red/cyan anaglyph random-dot ste
 - `P` = pause/resume.
 - `Esc` exits fullscreen and pauses.
 - Leaving the tab/window auto-pauses the session so timing does not keep running in the background.
+- Session targets and demand are capped by physiology per mode. Divergence
+  caps at what the eyes can geometrically reach: relaxing to parallel cancels
+  the baseline convergence to the screen (eye separation over viewing
+  distance) plus a small margin beyond, about 21Δ at a 16-inch distance and
+  less when sitting farther back. Vertical modes cap at `VERTICAL_PD_CAP`
+  (default 8Δ) since vertical fusional range is only a few diopters.
+  Convergence and the mixed jump modes keep the wide generic limit.
 - Scoring: correct = `+1`; wrong / timeout / space = `-1`.
 - Demand follows a 3-down/1-up staircase: three consecutive correct answers raise
   demand by `PD_GAIN_PER_CORRECT`; any error lowers it by `PD_LOSS_PER_ERROR`.

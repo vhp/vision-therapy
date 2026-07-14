@@ -23,6 +23,7 @@ const {
   getVerticalPolaritySign: coreGetVerticalPolaritySign,
   getVergenceVector: coreGetVergenceVector,
   getTotalSplitPx: coreGetTotalSplitPx,
+  getDivergenceCeilingPd: coreGetDivergenceCeilingPd,
   normalizeExerciseKey: coreNormalizeExerciseKey,
   recordScoringEvent: coreRecordScoringEvent,
   getExerciseScore: coreGetExerciseScore,
@@ -57,6 +58,7 @@ const {
   SMOOTH_RAMP_PD_PER_SEC = 0.4,
   SMOOTH_BREAK_DROP_PD = 8,
   CATCH_TRIAL_PROBABILITY = 0.15,
+  VERTICAL_PD_CAP = 8,
   INACTIVITY_PAUSE_MS,
   NEXT_ROUND_DELAY_MS,
   CONFIG_STORAGE_KEY,
@@ -1091,7 +1093,8 @@ function readConfigInputs() {
     Number.parseFloat(rightDotIntensityInput.value), MIN_DOT_INTENSITY, MAX_DOT_INTENSITY, DEFAULT_RIGHT_DOT_INTENSITY
   );
   const startPd = clampInt(startPdRaw, 0, ABSOLUTE_PD_MAX, DEFAULT_START_PD);
-  const goalPd = clampInt(goalPdRaw, 1, ABSOLUTE_PD_MAX, DEFAULT_GOAL_PD);
+  const goalCapPd = Math.floor(getModePdCap(vergenceMode, viewDistanceIn));
+  const goalPd = clampInt(goalPdRaw, 1, goalCapPd, Math.min(DEFAULT_GOAL_PD, goalCapPd));
   const sessionMinutes = clampInt(sessionMinutesRaw, 1, ABSOLUTE_SESSION_MINUTES_MAX, DEFAULT_SESSION_MINUTES);
   const roundSeconds = clampInt(roundSecondsRaw, MIN_ROUND_SECONDS, MAX_ROUND_SECONDS, DEFAULT_ROUND_SECONDS);
 
@@ -1231,6 +1234,7 @@ function applyConfigInputs(config) {
   redLensSideInput.value = normalizeRedLensSide(config.redLensSide);
   visualPresetInput.value = normalizeVisualPreset(config.visualPreset);
   startPdInput.value = String(config.startPd);
+  goalPdInput.max = String(Math.floor(getModePdCap(config.vergenceMode, config.viewDistanceIn)));
   goalPdInput.value = String(config.goalPd);
   sessionMinutesInput.value = String(config.sessionMinutes);
   roundSecondsInput.value = String(config.roundSeconds);
@@ -1453,7 +1457,8 @@ function applyConfigToState(config) {
   state.viewDistanceIn = config.viewDistanceIn;
   state.leftDotIntensity = config.leftDotIntensity;
   state.rightDotIntensity = config.rightDotIntensity;
-  state.difficultySteps = pdToDifficultySteps(config.startPd, config.monitorWidthIn, config.viewDistanceIn);
+  const startPdCapped = Math.min(config.startPd, getModePdCap(config.vergenceMode, config.viewDistanceIn));
+  state.difficultySteps = pdToDifficultySteps(startPdCapped, config.monitorWidthIn, config.viewDistanceIn);
   state.currentPd = difficultyToPd(state.difficultySteps, state.monitorWidthIn, state.viewDistanceIn);
   state.bestPd = state.currentPd;
   state.sessionDurationMs = config.sessionMinutes * 60_000;
@@ -1597,6 +1602,27 @@ function isSmoothMode() {
   return normalizeVergenceMode(state.vergenceMode) === "smooth";
 }
 
+const NOMINAL_IPD_CM = 6.2;
+const DIVERGENCE_CEILING_MARGIN_PD = 6;
+
+// Physiologic ceiling for goals and demand, per mode. Pure divergence is
+// bounded by geometry (eyes can relax to parallel plus a small margin) and
+// vertical fusional range is a few diopters; convergence and the mixed jump
+// modes keep the wide generic limit.
+function getModePdCap(mode, viewDistanceIn) {
+  const normalized = normalizeVergenceMode(mode);
+  if (normalized === "divergence") {
+    return Math.min(
+      ABSOLUTE_PD_MAX,
+      coreGetDivergenceCeilingPd(viewDistanceIn, NOMINAL_IPD_CM, DIVERGENCE_CEILING_MARGIN_PD)
+    );
+  }
+  if (normalized === "vergence_up" || normalized === "vergence_down") {
+    return Math.min(ABSOLUTE_PD_MAX, VERTICAL_PD_CAP);
+  }
+  return ABSOLUTE_PD_MAX;
+}
+
 function getFacilityDemandPd(roundVergence) {
   return roundVergence === "divergence" ? FACILITY_BASE_IN_PD : FACILITY_BASE_OUT_PD;
 }
@@ -1621,7 +1647,8 @@ function applySmoothRampTick() {
     getScreenWidthPx(),
     SPLIT_GAIN_PX_PER_STEP
   );
-  const maxDifficultySteps = pdToDifficultySteps(ABSOLUTE_PD_MAX, state.monitorWidthIn, state.viewDistanceIn);
+  const rampCapPd = getModePdCap(state.vergenceMode, state.viewDistanceIn);
+  const maxDifficultySteps = pdToDifficultySteps(rampCapPd, state.monitorWidthIn, state.viewDistanceIn);
   state.difficultySteps = coreClampDifficultySteps(state.difficultySteps + rampSteps, maxDifficultySteps);
   state.currentPd = difficultyToPd(state.difficultySteps, state.monitorWidthIn, state.viewDistanceIn);
   renderScene();
@@ -1659,7 +1686,8 @@ function applyPdDelta(pdDelta) {
 
 function applyDifficultyDelta(deltaSteps) {
   const beforePd = difficultyToPd(state.difficultySteps, state.monitorWidthIn, state.viewDistanceIn);
-  const maxDifficultySteps = pdToDifficultySteps(ABSOLUTE_PD_MAX, state.monitorWidthIn, state.viewDistanceIn);
+  const demandCapPd = getModePdCap(state.vergenceMode, state.viewDistanceIn);
+  const maxDifficultySteps = pdToDifficultySteps(demandCapPd, state.monitorWidthIn, state.viewDistanceIn);
   state.difficultySteps = coreClampDifficultySteps(state.difficultySteps + deltaSteps, maxDifficultySteps);
   state.currentPd = difficultyToPd(state.difficultySteps, state.monitorWidthIn, state.viewDistanceIn);
   return state.currentPd - beforePd;

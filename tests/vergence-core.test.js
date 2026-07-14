@@ -206,6 +206,17 @@ test("difficulty steps clamp to the allowed range", () => {
   assert.equal(core.clampDifficultySteps(80, 50), 50);
 });
 
+test("divergence ceiling follows viewing distance and matches the near norm", () => {
+  const atSixteenInches = core.getDivergenceCeilingPd(16, 6.2, 6);
+  assert(Math.abs(atSixteenInches - 21.25) < 0.1, `expected about 21.25, got ${atSixteenInches}`);
+
+  const atSixtyInches = core.getDivergenceCeilingPd(60, 6.2, 6);
+  assert(atSixtyInches > 9.9 && atSixtyInches < 10.2, `expected about 10.1, got ${atSixtyInches}`);
+
+  assert.equal(core.getDivergenceCeilingPd(0, 6.2, 6), 6);
+  assert.equal(core.getDivergenceCeilingPd(Number.NaN, 6.2, 6), 6);
+});
+
 test("canvas metrics follow rendered display size", () => {
   const canvas = {
     clientWidth: 960,

@@ -110,6 +110,17 @@
     return baseTotalSplitPx + safeSteps * splitGainPxPerStep;
   }
 
+  // The most base-in (divergence) demand a person can meet: relaxing the eyes
+  // to parallel cancels the baseline convergence to the screen (eye separation
+  // over viewing distance), and true divergence beyond parallel adds only a
+  // few diopters more. At a typical 40cm read distance this lands on the
+  // published near base-in break norm of about 21.
+  function getDivergenceCeilingPd(viewDistanceIn, ipdCm, marginPd) {
+    const distanceM = viewDistanceIn * 0.0254;
+    if (!Number.isFinite(distanceM) || distanceM <= 0) return marginPd;
+    return ipdCm / distanceM + marginPd;
+  }
+
   function getMmPerPixel(monitorWidthIn, screenWidthPx) {
     if (!Number.isFinite(monitorWidthIn) || monitorWidthIn <= 0) return 0;
     if (!Number.isFinite(screenWidthPx) || screenWidthPx <= 0) return 0;
@@ -366,6 +377,7 @@
     getVerticalPolaritySign,
     getVergenceVector,
     getTotalSplitPx,
+    getDivergenceCeilingPd,
     normalizeExerciseKey,
     createEmptyExerciseMetrics,
     recordScoringEvent,

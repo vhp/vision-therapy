@@ -51,7 +51,10 @@ const MODE_SCENARIOS = [
     verticalPolarity: "standard",
     expectedInitialExercises: ["Divergence"],
     expectedNextExercises: ["Divergence"],
-    expectedAxis: "H"
+    expectedAxis: "H",
+    // The default 30 goal must clamp to the physiologic divergence ceiling
+    // at the default 16in view distance (about 21).
+    expectedGoalText: "session target 21.0Δ"
   },
   {
     label: "Jump Vergence (Alternating)",
@@ -109,7 +112,8 @@ const MODE_SCENARIOS = [
     verticalPolarity: "standard",
     expectedInitialExercises: ["Vergence Up"],
     expectedNextExercises: ["Vergence Up"],
-    expectedAxis: "V"
+    expectedAxis: "V",
+    expectedGoalText: "session target 8.0Δ"
   },
   {
     label: "Vergence Down / Circle / Flipped",
@@ -870,6 +874,14 @@ async function runModeScenario(scenario) {
 
   await waitForReadyState(frameDocument);
   recordResult("pass", `${scenario.label}: ready state confirmed`);
+
+  if (scenario.expectedGoalText) {
+    const statusText = String(frameDocument.getElementById("status")?.textContent || "");
+    if (!statusText.includes(scenario.expectedGoalText)) {
+      throw new Error(`${scenario.label}: expected "${scenario.expectedGoalText}" in ready status, got "${statusText}"`);
+    }
+    recordResult("pass", `${scenario.label}: goal capped to physiology`);
+  }
 
   const { startBtn, debugStatusEl } = await startSession(frameDocument);
   recordResult("pass", `${scenario.label}: session started`);
