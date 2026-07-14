@@ -260,6 +260,11 @@
     return pair;
   }
 
+  function hasPendingRangeBreak(rangeTracker, exerciseKey) {
+    const entry = rangeTracker[normalizeExerciseKey(exerciseKey) || "unassigned"];
+    return Boolean(entry) && entry.pendingBreakPd !== null;
+  }
+
   function getBestRangePair(rangeTracker, exerciseKey) {
     const entry = rangeTracker[normalizeExerciseKey(exerciseKey) || "unassigned"];
     if (!entry || entry.pairs.length === 0) return null;
@@ -387,6 +392,7 @@
     advanceStaircase,
     recordRangeBreak,
     recordRangeRecovery,
+    hasPendingRangeBreak,
     getBestRangePair,
     getMmPerPixel,
     splitPxToPd,

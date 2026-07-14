@@ -22,6 +22,7 @@ const MODE_SCENARIOS = [
     verifyTimeoutGuard: true,
     verifyTimeoutPauseResume: true,
     verifyResizeDuringPause: true,
+    verifyRangeDescent: true,
     suppressionDemandText: "Demand reduced"
   },
   {
@@ -650,6 +651,27 @@ async function verifyCatchTrials(frameWindow, frameDocument, debugStatusEl) {
   });
 }
 
+async function verifyRangeDescent(frameWindow, frameDocument, debugStatusEl) {
+  const statusEl = frameDocument.getElementById("status");
+  const totalBefore = Number(parseDebugStatus(debugStatusEl.textContent).total);
+
+  // First Space records the break and costs one point like any failure.
+  dispatchKey(frameWindow, "Space", " ");
+  await waitFor("break recorded", () => {
+    const d = parseDebugStatus(debugStatusEl.textContent);
+    return Number(d.total) === totalBefore - 1 &&
+      String(statusEl.textContent || "").includes("Break recorded");
+  });
+
+  // Space presses during the descent must not cost score or count as skips.
+  dispatchKey(frameWindow, "Space", " ");
+  await waitFor("descent is score-free", () => {
+    const d = parseDebugStatus(debugStatusEl.textContent);
+    return Number(d.total) === totalBefore - 1 &&
+      String(statusEl.textContent || "").includes("Descending");
+  });
+}
+
 async function verifySuppressionMessage(frameWindow, frameDocument, expectedFragment) {
   const statusEl = frameDocument.getElementById("status");
   dispatchKey(frameWindow, "KeyS", "s");
@@ -948,6 +970,11 @@ async function runModeScenario(scenario) {
   if (scenario.suppressionDemandText) {
     await verifySuppressionMessage(frameWindow, frameDocument, scenario.suppressionDemandText);
     recordResult("pass", `${scenario.label}: suppression message verified`);
+  }
+
+  if (scenario.verifyRangeDescent) {
+    await verifyRangeDescent(frameWindow, frameDocument, debugStatusEl);
+    recordResult("pass", `${scenario.label}: break descent does not cost score`);
   }
 
   if (scenario.verifyPauseResume) {

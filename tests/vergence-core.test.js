@@ -174,8 +174,12 @@ test("break/recovery pairs track per exercise", () => {
   assert.deepEqual(core.recordRangeRecovery(tracker, "convergence", 18), { breakPd: 24, recoveryPd: 18 });
   assert.equal(core.recordRangeRecovery(tracker, "convergence", 17), null);
 
+  assert.equal(core.hasPendingRangeBreak(tracker, "convergence"), false);
   core.recordRangeBreak(tracker, "convergence", 30);
+  assert.equal(core.hasPendingRangeBreak(tracker, "convergence"), true);
+  assert.equal(core.hasPendingRangeBreak(tracker, "divergence"), false);
   core.recordRangeRecovery(tracker, "convergence", 22);
+  assert.equal(core.hasPendingRangeBreak(tracker, "convergence"), false);
   core.recordRangeBreak(tracker, "convergence", 27);
   core.recordRangeRecovery(tracker, "convergence", 20);
 

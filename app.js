@@ -32,6 +32,7 @@ const {
   advanceStaircase: coreAdvanceStaircase,
   recordRangeBreak: coreRecordRangeBreak,
   recordRangeRecovery: coreRecordRangeRecovery,
+  hasPendingRangeBreak: coreHasPendingRangeBreak,
   getBestRangePair: coreGetBestRangePair,
   getMmPerPixel: coreGetMmPerPixel,
   splitPxToPd: coreSplitPxToPd,
@@ -815,9 +816,24 @@ function onKeyDown(event) {
   if (event.code === "Space") {
     event.preventDefault();
     state.lastResponseTs = performance.now();
+    const rangeEligible = isRangeEligibleMode();
+
+    // After a break is recorded, further Space presses are the measurement
+    // descent toward the recovery point, not performance failures: demand
+    // steps down without touching the score or counters.
+    if (rangeEligible && coreHasPendingRangeBreak(state.vergenceRanges, state.roundVergence)) {
+      const pdDelta = applyErrorDemandDrop();
+      setRoundDebugState("rangeDescent", "space", state.targetSide, pdDelta);
+      beep(500, 70);
+      updateStatus(`Descending: now ${formatPd(state.currentPd)}Δ. Answer the target when you can fuse it again.`);
+      updateHud();
+      startRound();
+      return;
+    }
+
     const skipScore = recordScoringEvent("skip", state.roundVergence);
     state.staircaseStreak = 0;
-    const breakRecorded = coreRecordRangeBreak(state.vergenceRanges, state.roundVergence, state.currentPd);
+    const breakRecorded = rangeEligible && coreRecordRangeBreak(state.vergenceRanges, state.roundVergence, state.currentPd);
     const breakText = breakRecorded ? ` Break recorded at ${formatPd(state.currentPd)}Δ.` : "";
     const pdDelta = applyErrorDemandDrop();
     setRoundDebugState("skip", "space", state.targetSide, pdDelta);
@@ -840,7 +856,9 @@ function onKeyDown(event) {
     // here, on a correct answer, at the demand of the round just cleared.
     state.bestPd = Math.max(state.bestPd, state.currentPd);
     const correctScore = recordScoringEvent("correct", state.roundVergence);
-    const recoveryPair = coreRecordRangeRecovery(state.vergenceRanges, state.roundVergence, state.currentPd);
+    const recoveryPair = isRangeEligibleMode()
+      ? coreRecordRangeRecovery(state.vergenceRanges, state.roundVergence, state.currentPd)
+      : null;
     let pdDelta = 0;
     let progressText;
     if (isFacilityMode()) {
@@ -1610,6 +1628,15 @@ function isSmoothMode() {
 
 function isCatchEligibleMode() {
   return !isFacilityMode() && !isSmoothMode();
+}
+
+// Break/recovery pairs are only trustworthy when one exercise owns the demand
+// path from break to recovery. The jump modes share the demand across both
+// directions and facility pins it, so ranges are not recorded there.
+function isRangeEligibleMode() {
+  const normalized = normalizeVergenceMode(state.vergenceMode);
+  return normalized === "convergence" || normalized === "divergence" ||
+    normalized === "smooth" || normalized === "vergence_up" || normalized === "vergence_down";
 }
 
 const NOMINAL_IPD_CM = 6.2;

@@ -64,6 +64,12 @@ Browser-based vergence training prototype using red/cyan anaglyph random-dot ste
   break/recovery pair per exercise appears in the session summary, mirroring
   clinical fusional range measurement. Timeouts do not record breaks since they
   can reflect inattention rather than fusion loss.
+- Ranges are only recorded in the single-direction modes (Convergence,
+  Divergence, Smooth, and the vertical modes). In the jump modes both
+  directions share one demand path, which would contaminate the pairs. While a
+  break is pending, further `Space` presses step the demand down without
+  costing score: descending to find the recovery point is measurement, not
+  failure.
 - Scores are tracked per exercise (for example separate convergence/divergence scores in alternating mode).
 - HUD score is exercise-scoped; alternating sessions show per-exercise score codes (for example `C:3 D:-1`).
 - Session summary is shown at the end.
