@@ -192,6 +192,13 @@ const SIDE_KEYS = {
 };
 const SIDES = ["up", "right", "down", "left"];
 const EXERCISE_LABEL = "Vergence Trainer";
+// Nominal adult interpupillary distance, 62mm, the standard average used when
+// the real value is unknown. Only sets the divergence ceiling, which is a
+// coarse guard, so a per-person value is not worth collecting.
+const NOMINAL_IPD_CM = 6.2;
+// True divergence reaches only a few prism diopters past parallel eyes, so the
+// base-in ceiling is the parallel-eye demand plus this small margin.
+const DIVERGENCE_CEILING_MARGIN_PD = 6;
 
 function parseRgbColor(colorText, fallback) {
   const match = typeof colorText === "string"
@@ -1642,9 +1649,6 @@ function isRangeEligibleMode() {
   return normalized === "convergence" || normalized === "divergence" ||
     normalized === "smooth" || normalized === "vergence_up" || normalized === "vergence_down";
 }
-
-const NOMINAL_IPD_CM = 6.2;
-const DIVERGENCE_CEILING_MARGIN_PD = 6;
 
 // Physiologic ceiling for goals and demand, per mode. Pure divergence is
 // bounded by geometry (eyes can relax to parallel plus a small margin) and

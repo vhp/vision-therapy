@@ -6,6 +6,9 @@ let runInProgress = false;
 // Existing scenarios answer with arrows and must never hit a catch trial, so
 // they load with catch trials off. The catch scenario raises it to 1.
 let catchParamForBoot = "0";
+// Almost every boot clears saved settings for a clean slate. The persisted-boot
+// check turns this off to prove the app starts from a saved config.
+let clearSettingsForBoot = "1";
 const STATIC_SERVER_HELP = "Serve the repo from its root with `python3 -m http.server 4173`, then open `http://localhost:4173/tests/browser-smoke.html`.";
 const MODE_SCENARIOS = [
   {
@@ -214,7 +217,9 @@ async function waitFor(label, predicate, timeoutMs = 5000) {
 function getAppFrameUrl() {
   const url = new URL("../index.html", window.location.href);
   url.searchParams.set("debug", "1");
-  url.searchParams.set("clearSettings", "1");
+  if (clearSettingsForBoot === "1") {
+    url.searchParams.set("clearSettings", "1");
+  }
   url.searchParams.set("catch", catchParamForBoot);
   url.searchParams.set("run", String(Date.now()));
   return url.toString();
@@ -764,6 +769,64 @@ async function bootWithSeededHistory(records) {
   return { frameWindow, frameDocument };
 }
 
+// A saved divergence config must boot cleanly. The physiologic cap for
+// divergence is computed at startup, and if its constants are not yet defined
+// the whole init throws and the app never reaches the ready state. Scenarios
+// normally boot with clearSettings, which hides this by discarding the config.
+async function verifyPersistedDivergenceBoots() {
+  const boot = await bootFreshApp();
+  const configKey = getStorageKey(boot.frameWindow);
+  boot.frameWindow.localStorage.setItem(configKey, JSON.stringify({
+    monitorWidthIn: 24,
+    monitorWidthConfirmed: true,
+    monitorWidthNeedsReconfirm: false,
+    displayContext: {
+      screenWidth: boot.frameWindow.screen.width,
+      screenHeight: boot.frameWindow.screen.height,
+      devicePixelRatio: boot.frameWindow.devicePixelRatio || 1
+    },
+    viewDistanceIn: 16,
+    leftDotIntensity: 0.9,
+    rightDotIntensity: 0.9,
+    vergenceMode: "divergence",
+    fieldShape: "circle",
+    fieldSize: "large",
+    verticalPolarity: "standard",
+    redLensSide: "right",
+    visualPreset: "balanced",
+    startPd: 0,
+    goalPd: 30,
+    sessionMinutes: 7,
+    roundSeconds: 20
+  }));
+
+  clearSettingsForBoot = "";
+  try {
+    await loadFrame();
+    const frameDocument = appFrame.contentWindow.document;
+    await waitFor("persisted divergence config boots", () =>
+      frameDocument.getElementById("startBtn") &&
+      String(frameDocument.getElementById("status")?.textContent || "").startsWith("Ready:"));
+
+    const statusText = String(frameDocument.getElementById("status").textContent || "");
+    if (!statusText.includes("mode Divergence")) {
+      throw new Error(`Persisted divergence boot: expected Divergence in ready status, got "${statusText}"`);
+    }
+    // The saved 30 goal must have clamped to the physiologic divergence ceiling,
+    // proving the cap ran during init rather than throwing.
+    if (!statusText.includes("session target 21.0Δ")) {
+      throw new Error(`Persisted divergence boot: expected goal capped to 21.0, got "${statusText}"`);
+    }
+  } finally {
+    clearSettingsForBoot = "1";
+    try {
+      appFrame.contentWindow.localStorage.removeItem(getStorageKey(appFrame.contentWindow));
+    } catch {
+      // Frame may be mid-navigation; the next clearSettings boot clears it anyway.
+    }
+  }
+}
+
 async function verifyDebugSessionMarked() {
   const seeded = [
     {
@@ -1004,6 +1067,9 @@ async function runSmokeSuite() {
   recordResult("pass", "Starting smoke suite");
   let suiteError = null;
   try {
+    await verifyPersistedDivergenceBoots();
+    recordResult("pass", "Persisted divergence config boots to ready");
+
     await verifyCorruptHistoryBoots();
     recordResult("pass", "Corrupt history boots and renders safely");
 
