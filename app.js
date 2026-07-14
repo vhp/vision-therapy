@@ -400,6 +400,7 @@ const state = {
   catchTrial: false,
   catchTotal: 0,
   catchFalseAlarm: 0,
+  catchTimeout: 0,
   metricsByExercise: Object.create(null),
   vergenceRanges: Object.create(null),
   sessionDurationMs: DEFAULT_SESSION_MINUTES * 60_000,
@@ -676,8 +677,10 @@ function startRound() {
   }
   state.targetSide = SIDES[(Math.random() * SIDES.length) | 0];
   // A catch trial shows no real target; the honest response is Space. Answering
-  // a direction is a false alarm, which flags guessing.
-  state.catchTrial = Math.random() < CATCH_PROBABILITY;
+  // a direction is a false alarm, which flags guessing. Facility and smooth
+  // modes are exempt: catch rounds would deflate cycles-per-minute in one and
+  // collide with Space's break-report meaning in the other.
+  state.catchTrial = isCatchEligibleMode() && Math.random() < CATCH_PROBABILITY;
   state.roundSeed = ((Math.random() * 0xffffffff) | 0) >>> 0;
   state.roundStartTs = now;
   state.roundEndTs = state.roundStartTs + state.roundDurationMs;
@@ -725,9 +728,11 @@ function handleRoundTimeout() {
   stopRoundTicker();
 
   if (state.catchTrial) {
-    // No target to miss: letting the clock run out is a correct rejection, not
-    // a scored error, so demand and the streak are left untouched.
+    // No target to miss, so no scored error; demand and the streak are left
+    // untouched. Counted apart from active rejections because sitting out the
+    // clock says nothing about honesty.
     recordCatchResponse(false);
+    state.catchTimeout += 1;
     setRoundDebugState("catchTimeout", "-", "-", 0);
     beep(660, 120);
     updateStatus("No target that round. Nothing to report.");
@@ -1478,6 +1483,7 @@ function resetScoringState() {
   state.catchTrial = false;
   state.catchTotal = 0;
   state.catchFalseAlarm = 0;
+  state.catchTimeout = 0;
   state.metricsByExercise = Object.create(null);
   state.vergenceRanges = Object.create(null);
 }
@@ -1600,6 +1606,10 @@ function isFacilityMode() {
 
 function isSmoothMode() {
   return normalizeVergenceMode(state.vergenceMode) === "smooth";
+}
+
+function isCatchEligibleMode() {
+  return !isFacilityMode() && !isSmoothMode();
 }
 
 const NOMINAL_IPD_CM = 6.2;
@@ -2537,6 +2547,7 @@ function buildSessionHistoryRecord(reachedGoal) {
     suppressions: state.suppressionCount,
     catchTotal: state.catchTotal,
     catchFalseAlarm: state.catchFalseAlarm,
+    catchTimeout: state.catchTimeout,
     ranges,
     facility: isFacilityMode() ? { cycles: getFacilityCycles(), cpm: getFacilityCpm() } : null
   };
@@ -2842,7 +2853,7 @@ function exportSessionHistoryCsv() {
   const header = [
     "endedAt", "debug", "mode", "visualPreset", "fieldSize", "redLensSide", "sessionMinutes", "goalPd", "bestPd", "reachedGoal",
     "totalScore", "rounds", "correct", "wrong", "timeouts", "skips", "suppressions",
-    "catchTotal", "catchFalseAlarm", "bestBreakPd", "bestRecoveryPd", "facilityCycles", "facilityCpm"
+    "catchTotal", "catchFalseAlarm", "catchTimeout", "bestBreakPd", "bestRecoveryPd", "facilityCycles", "facilityCpm"
   ];
   const lines = [header.map(coreCsvEscapeField).join(",")];
   for (const record of history) {
@@ -2867,6 +2878,7 @@ function exportSessionHistoryCsv() {
       record.suppressions ?? "",
       record.catchTotal ?? "",
       record.catchFalseAlarm ?? "",
+      record.catchTimeout ?? "",
       bestRange ? bestRange.breakPd : "",
       bestRange ? bestRange.recoveryPd : "",
       record.facility?.cycles ?? "",

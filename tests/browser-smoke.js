@@ -79,6 +79,9 @@ const MODE_SCENARIOS = [
     vergenceMode: "facility",
     fieldShape: "square",
     verticalPolarity: "standard",
+    // Booting with catch=1 proves facility mode ignores catch trials: if one
+    // ever fired, the arrow answers below would be swallowed as false alarms.
+    catchParam: "1",
     expectedInitialExercises: ["Convergence"],
     expectedNextExercises: ["Divergence"],
     expectedAxis: "H",
@@ -100,6 +103,9 @@ const MODE_SCENARIOS = [
     vergenceMode: "smooth",
     fieldShape: "square",
     verticalPolarity: "standard",
+    // catch=1 proves smooth mode ignores catch trials, keeping Space's
+    // break-report meaning intact.
+    catchParam: "1",
     expectedInitialExercises: ["Convergence"],
     expectedNextExercises: ["Convergence"],
     expectedAxis: "H",

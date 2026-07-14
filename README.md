@@ -37,9 +37,13 @@ Browser-based vergence training prototype using red/cyan anaglyph random-dot ste
 - A fraction of rounds (`CATCH_TRIAL_PROBABILITY` in config.js, default 15%)
   are catch trials with no real target. The honest response is `Space`;
   choosing a direction is a false alarm. Catch trials never change the score,
-  demand, or ranges. The summary and export report catch count and false
-  alarms, so a high false-alarm rate flags guessing. Append `?catch=<0..1>` to
-  the URL to change the rate for a session (e.g. `?catch=0` to turn them off).
+  demand, or ranges, and they only appear in the staircase modes: Facility is
+  exempt because dead rounds would deflate its cycles-per-minute, and Smooth is
+  exempt because Space already means "it split" there. The summary and export
+  report catch count and false alarms (timeouts on catch rounds are counted
+  apart, since sitting out the clock says nothing about honesty). Append
+  `?catch=<0..1>` to the URL to change the rate for a session (e.g. `?catch=0`
+  to turn them off).
 - `P` = pause/resume.
 - `Esc` exits fullscreen and pauses.
 - Leaving the tab/window auto-pauses the session so timing does not keep running in the background.
