@@ -186,6 +186,15 @@ test("break/recovery pairs track per exercise", () => {
   assert.deepEqual(core.getBestRangePair(tracker, "convergence"), { breakPd: 30, recoveryPd: 22 });
   assert.equal(core.getBestRangePair(tracker, "divergence"), null);
   assert.equal(core.recordRangeBreak(tracker, "convergence", Number.NaN), false);
+
+  // A recovery at or above the break is not physiologic and is rejected; the
+  // break stays pending until a genuinely lower recovery arrives.
+  assert.equal(core.recordRangeBreak(tracker, "divergence", 15), true);
+  assert.equal(core.recordRangeRecovery(tracker, "divergence", 15), null);
+  assert.equal(core.hasPendingRangeBreak(tracker, "divergence"), true);
+  assert.equal(core.recordRangeRecovery(tracker, "divergence", 18), null);
+  assert.equal(core.hasPendingRangeBreak(tracker, "divergence"), true);
+  assert.deepEqual(core.recordRangeRecovery(tracker, "divergence", 11), { breakPd: 15, recoveryPd: 11 });
 });
 
 test("csv fields are quoted and formula-guarded without mangling numbers", () => {

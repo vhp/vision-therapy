@@ -254,6 +254,11 @@
     const key = normalizeExerciseKey(exerciseKey) || "unassigned";
     const entry = rangeTracker[key];
     if (!entry || entry.pendingBreakPd === null) return null;
+    // Recovery is always at a lower demand than the break it answers. If it is
+    // not below (for example the smooth ramp climbed back up before the user
+    // re-fused), the pair is not physiologic, so keep the break pending and
+    // wait for a genuine lower recovery rather than storing an inverted pair.
+    if (recoveryPd >= entry.pendingBreakPd) return null;
     const pair = { breakPd: entry.pendingBreakPd, recoveryPd };
     entry.pairs.push(pair);
     entry.pendingBreakPd = null;
