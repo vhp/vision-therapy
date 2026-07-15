@@ -195,6 +195,13 @@ test("break/recovery pairs track per exercise", () => {
   assert.equal(core.recordRangeRecovery(tracker, "divergence", 18), null);
   assert.equal(core.hasPendingRangeBreak(tracker, "divergence"), true);
   assert.deepEqual(core.recordRangeRecovery(tracker, "divergence", 11), { breakPd: 15, recoveryPd: 11 });
+
+  // A break at or below zero demand is not a measurement (no lower recovery
+  // could ever answer it), so it is rejected and never left pending.
+  assert.equal(core.recordRangeBreak(tracker, "vergence_up", 0), false);
+  assert.equal(core.hasPendingRangeBreak(tracker, "vergence_up"), false);
+  assert.equal(core.recordRangeBreak(tracker, "vergence_up", -3), false);
+  assert.equal(core.hasPendingRangeBreak(tracker, "vergence_up"), false);
 });
 
 test("csv fields are quoted and formula-guarded without mangling numbers", () => {

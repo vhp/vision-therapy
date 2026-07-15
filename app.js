@@ -666,6 +666,18 @@ function queueViewportRefresh() {
 
 function refreshViewport() {
   state.nowTs = performance.now();
+  // A resize can carry a display-context change (browser zoom, a move to
+  // another monitor). Running past it would train the rest of the session on
+  // stale calibration, so end it here, keeping the work already recorded, and
+  // force a reconfirm before the next start.
+  if (state.running && detectDisplayContextChange()) {
+    clearPendingNextRound();
+    state.resumeStartsNextRound = false;
+    endSession();
+    syncMonitorWidthSetupUi();
+    updateStatus(`Session ended: ${getMonitorWidthBlockedMessage()}`, true);
+    return;
+  }
   state.dots = buildDotField(getCurrentDotCount(), getFieldExtent(), state.roundSeed || 1001, state.visualTuning);
   updateHud();
   renderScene();
@@ -2721,6 +2733,16 @@ function sanitizeRecordPd(value) {
   return Number.isFinite(value) && value >= 0 && value <= ABSOLUTE_PD_MAX ? value : null;
 }
 
+// History records can come from a hand-edited file or a newer app version.
+// Show a recognized mode's real label, but never coerce an unknown mode into a
+// default: a stranger's mode reads as its raw value, not as "Convergence".
+function formatHistoryModeLabel(mode) {
+  if (typeof mode === "string" && VERGENCE_MODE_MAP.has(mode)) {
+    return VERGENCE_MODE_MAP.get(mode).label;
+  }
+  return typeof mode === "string" && mode.trim() ? mode.trim() : "-";
+}
+
 function formatHistoryDate(isoText) {
   const date = new Date(isoText);
   if (Number.isNaN(date.getTime())) return "-";
@@ -2751,7 +2773,7 @@ function renderSessionHistory() {
     const bestRange = getRecordBestRange(record);
     const cells = [
       formatHistoryDate(record.endedAt),
-      record.debug === true ? `${formatVergenceLabel(record.mode)} (debug)` : formatVergenceLabel(record.mode),
+      record.debug === true ? `${formatHistoryModeLabel(record.mode)} (debug)` : formatHistoryModeLabel(record.mode),
       sanitizeRecordPd(record.bestPd) !== null ? `${formatPd(sanitizeRecordPd(record.bestPd))}Δ` : "-",
       bestRange ? `${formatPd(bestRange.breakPd)}/${formatPd(bestRange.recoveryPd)}Δ` : "-",
       String(record.totalScore ?? "-"),
@@ -2771,10 +2793,16 @@ function renderSessionHistory() {
 
 // Debug sessions can start at an arbitrary demand, and facility has no PD
 // threshold (its bestPd is pinned low), so both are kept off the progress
-// trend; they still appear in the table and exports.
+// trend; they still appear in the table and exports. Unrecognized modes are
+// also excluded: their bestPd cannot be trusted as a real threshold, and
+// normalizing them to convergence would plot a stranger's data as convergence.
 function deriveTrendData(records) {
   return records
-    .filter(record => record.debug !== true && normalizeVergenceMode(record.mode) !== "facility")
+    .filter(record =>
+      record.debug !== true &&
+      typeof record.mode === "string" &&
+      VERGENCE_MODE_MAP.has(record.mode) &&
+      record.mode !== "facility")
     .slice(-TREND_MAX_SESSIONS)
     .map(record => {
       const bestRange = getRecordBestRange(record);

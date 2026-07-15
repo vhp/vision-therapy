@@ -658,6 +658,21 @@ async function verifyCatchTrials(frameWindow, frameDocument, debugStatusEl) {
 
 async function verifyRangeDescent(frameWindow, frameDocument, debugStatusEl) {
   const statusEl = frameDocument.getElementById("status");
+  const prismEl = frameDocument.getElementById("prism");
+  const readPd = () => Number.parseFloat(String(prismEl.textContent || "").replace(/[^\d.]/g, ""));
+
+  // Raise demand off the zero floor first: a break is only a fusional-range
+  // measurement above zero demand, so a Space at the floor is a plain skip.
+  // The debug hotkey bumps demand without scoring or advancing the round.
+  let guard = 0;
+  while (readPd() < 3 && guard < 40) {
+    dispatchKey(frameWindow, "BracketRight", "]");
+    guard += 1;
+  }
+  if (readPd() < 3) {
+    throw new Error(`Range descent: could not raise demand off the floor, stuck at ${readPd()}Δ`);
+  }
+
   const totalBefore = Number(parseDebugStatus(debugStatusEl.textContent).total);
 
   // First Space records the break and costs one point like any failure.
@@ -682,6 +697,22 @@ async function verifyRangeDescent(frameWindow, frameDocument, debugStatusEl) {
     const d = parseDebugStatus(debugStatusEl.textContent);
     return d.event === "rangeDescent" && d.input === "-" && Number(d.total) === totalBefore - 1;
   }, 9000);
+
+  // A correct answer at the lower demand closes the range: the recovery is
+  // recorded (the status reports it) and the break stops being pending. The
+  // correct answer itself scores +1, returning the total to its pre-break value.
+  await waitFor("descent advances to a fresh target", () => {
+    const d = parseDebugStatus(debugStatusEl.textContent);
+    return d.event === "pending" && Boolean(getTargetArrow(d.target));
+  });
+  const recoveryState = parseDebugStatus(debugStatusEl.textContent);
+  const arrow = getTargetArrow(recoveryState.target);
+  dispatchKey(frameWindow, arrow.code, arrow.key);
+  await waitFor("recovery closes the range", () => {
+    const d = parseDebugStatus(debugStatusEl.textContent);
+    return String(statusEl.textContent || "").includes("Recovery at") &&
+      Number(d.total) === totalBefore;
+  });
 }
 
 async function verifySuppressionMessage(frameWindow, frameDocument, expectedFragment) {

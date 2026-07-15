@@ -239,7 +239,10 @@
   // break is the demand where fusion is reported lost, the recovery is the
   // demand where the next correct response lands for the same exercise.
   function recordRangeBreak(rangeTracker, exerciseKey, breakPd) {
-    if (!Number.isFinite(breakPd)) return false;
+    // A break at or below zero demand is not a fusional-range measurement: the
+    // demand floor is zero, so no lower recovery could ever answer it and the
+    // break would stay pending forever. Reject it so it stays a plain skip.
+    if (!Number.isFinite(breakPd) || breakPd <= 0) return false;
     const key = normalizeExerciseKey(exerciseKey) || "unassigned";
     if (!rangeTracker[key]) {
       rangeTracker[key] = { pendingBreakPd: null, pairs: [] };
@@ -276,7 +279,9 @@
     return entry.pairs.reduce((best, pair) => (pair.breakPd > best.breakPd ? pair : best));
   }
 
-  // N-down/1-up transformed staircase; with N=3 accuracy converges near 79%.
+  // N-down/1-up transformed staircase. Equal steps and N=3 target ~79%; the
+  // shipped asymmetric steps (0.75 up / 1 down, set in the caller) settle
+  // accuracy near 83%. This function only tracks the N-in-a-row rule.
   function advanceStaircase(consecutiveCorrect, outcomeType, correctPerStepUp) {
     const required = Math.max(1, Math.trunc(correctPerStepUp) || 1);
     if (outcomeType === "correct") {
