@@ -20,8 +20,22 @@ Browser-based vergence training prototype using red/cyan anaglyph random-dot ste
   - Opens a browser smoke harness that loads the real app and verifies all vergence modes, both field shapes, vertical polarity persistence, debug hotkeys, arrow-key response, timeout transition locking, timeout-transition pause/resume behavior, reset during timeout transition, focus-loss auto-pause, and pause/resume behavior.
   - The harness runs with short test values (`Round Seconds = 5`, `Session Minutes = 1`) so the real timers stay visible but the suite finishes quickly.
   - Use a local static server for the smoke harness; direct `file://` loading is intentionally blocked so the test always runs in a supported same-origin setup.
+- `make smoke`
+  - Runs that same browser smoke suite headlessly and reports pass/fail, so you
+    do not have to open the harness by hand. It serves the repo, drives the app
+    in a headless Chromium-based browser, scrapes the results, and tears the
+    server and all temp files down on the way out, including on failure or
+    Ctrl-C. A normal run finishes in a few seconds.
+  - Needs a Chromium-based browser. It looks for Google Chrome or Chromium in
+    the usual spots; set `CHROME=/path/to/browser` to point it somewhere else.
+  - `PORT` sets the local port (default 4173), and `SMOKE_TIMEOUT` is the
+    wall-clock ceiling in seconds before it gives up and reports failure
+    (default 180).
+  - Reach for `make serve` and a real browser instead when you want to watch a
+    scenario play out visually.
 - `make verify`
-  - Runs the syntax checks and the `node:test` suite together.
+  - Runs the syntax checks and the `node:test` suite together. It does not need
+    a browser; `make smoke` is the separate browser gate.
 - `make serve`
   - Starts the local static server on `http://localhost:4173/` and prints the smoke harness URL.
 

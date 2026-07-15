@@ -1,13 +1,14 @@
 PORT ?= 4173
 PYTHON ?= python3
 
-.PHONY: help check test verify serve
+.PHONY: help check test verify smoke serve
 
 help:
 	@echo "Targets:"
 	@echo "  make check   - Run syntax checks on the main JS files"
 	@echo "  make test    - Run the node:test suite"
 	@echo "  make verify  - Run check + test"
+	@echo "  make smoke   - Run the browser smoke suite headlessly (needs a Chromium-based browser)"
 	@echo "  make serve   - Start a local static server for manual browser smoke testing"
 
 check:
@@ -21,6 +22,9 @@ test:
 	node --test
 
 verify: check test
+
+smoke:
+	PORT=$(PORT) PYTHON=$(PYTHON) tests/smoke-headless.sh
 
 serve:
 	@echo "App:   http://localhost:$(PORT)/"
