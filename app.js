@@ -81,9 +81,9 @@ const {
   BASE_TOTAL_SPLIT_PX,
   SPLIT_GAIN_PX_PER_STEP,
   TARGET_SPLIT_PX = 12,
-  TARGET_OFFSET_RATIO = 0.52,
-  TARGET_HALF_SIZE_RATIO = 0.2,
-  TARGET_EDGE_PADDING_PX = 2,
+  TARGET_OFFSET_RATIO = 0.52,   // how far the target square sits from the field center, as a fraction of the field radius (just past halfway out)
+  TARGET_HALF_SIZE_RATIO = 0.2, // half the target square's side length, as a fraction of the field radius
+  TARGET_EDGE_PADDING_PX = 2,   // keep the target at least this many pixels inside the field edge so it never clips when disparity pushes it outward
   TARGET_POP_SIZE_PX = 0,
   TARGET_POP_ALPHA_SCALE = 1.0,
   INITIAL_DOT_COUNT,
@@ -174,6 +174,8 @@ const DEFAULT_VISUAL_PRESET_VALUE = VISUAL_PRESET_MAP.has(DEFAULT_VISUAL_PRESET)
 const DEFAULT_VISUAL_TUNING = getVisualPresetTuning(DEFAULT_VISUAL_PRESET_VALUE);
 const DEFAULT_FIELD_SHAPE_VALUE = DEFAULT_FIELD_SHAPE === "square" ? "square" : "circle";
 const FIELD_SHAPE_VALUES = Object.freeze(["circle", "square"]);
+// Each value is the field's radius as a fraction of the smaller screen
+// dimension; a smaller field gives the eyes less to lock onto, which is harder.
 const FIELD_SIZE_RATIOS = Object.freeze({ large: 0.34, medium: 0.27, small: 0.2 });
 const FIELD_SIZE_VALUES = Object.freeze(Object.keys(FIELD_SIZE_RATIOS));
 const DEFAULT_FIELD_SIZE_VALUE = "large";
@@ -215,8 +217,8 @@ function parseRgbColor(colorText, fallback) {
 
 const LEFT_DOT_RGB = parseRgbColor(LEFT_DOT_COLOR, { r: 255, g: 70, b: 70, a: 0.9 });
 const RIGHT_DOT_RGB = parseRgbColor(RIGHT_DOT_COLOR, { r: 58, g: 197, b: 255, a: 0.9 });
-const MIN_DOT_INTENSITY = 0.3;
-const MAX_DOT_INTENSITY = 1;
+const MIN_DOT_INTENSITY = 0.3; // lowest the intensity sliders go; below this the dots get too faint to fuse reliably
+const MAX_DOT_INTENSITY = 1;   // full opacity, the top of the intensity sliders
 const DEFAULT_LEFT_DOT_INTENSITY = Math.min(MAX_DOT_INTENSITY, Math.max(MIN_DOT_INTENSITY, LEFT_DOT_RGB.a));
 const DEFAULT_RIGHT_DOT_INTENSITY = Math.min(MAX_DOT_INTENSITY, Math.max(MIN_DOT_INTENSITY, RIGHT_DOT_RGB.a));
 const URL_FLAGS = readUrlFlags();
@@ -427,6 +429,8 @@ const state = {
   nowTs: performance.now(),
   pausedAtTs: 0,
   confirmedDisplayContext: null,
+  // 1001 is a fixed arbitrary seed so the idle preview looks identical on every
+  // load; real rounds randomize the seed.
   dots: buildDotField(INITIAL_DOT_COUNT, getFieldExtentForSize(DEFAULT_FIELD_SIZE_VALUE), 1001, DEFAULT_VISUAL_TUNING),
   lastRoundEvent: "idle",
   lastInputSide: "-",
@@ -454,8 +458,8 @@ const TREND_SERIES = Object.freeze([
   { key: "bestPd", label: "Best PD", color: "#28a878" },
   { key: "breakPd", label: "Break point", color: "#5b8ae6" }
 ]);
-const TREND_MAX_SESSIONS = 60;
-const TREND_MARGIN = Object.freeze({ top: 8, right: 12, bottom: 20, left: 40 });
+const TREND_MAX_SESSIONS = 60; // most recent sessions the progress chart plots; keeps the line readable instead of cramming in the full 200-session history
+const TREND_MARGIN = Object.freeze({ top: 8, right: 12, bottom: 20, left: 40 }); // padding in pixels around the chart's plot area (left is widest to fit the axis labels)
 let trendModel = null;
 
 let startInFlight = false;
@@ -582,7 +586,7 @@ function resetSession() {
   state.modeSequenceSeed = 0;
   state.roundVergence = resolveRoundVergence(config.vergenceMode, 1, state.modeSequenceSeed);
   state.targetSide = "up";
-  state.roundSeed = 1001;
+  state.roundSeed = 1001; // back to the fixed idle seed, so the pre-session field looks the same every time until startRound randomizes it
   state.roundStartTs = 0;
   state.roundEndTs = 0;
   state.sessionStartTs = 0;
@@ -782,7 +786,7 @@ function handleRoundTimeout() {
     recordCatchResponse(false);
     state.catchTimeout += 1;
     setRoundDebugState("catchTimeout", "-", "-", 0);
-    beep(660, 120);
+    beep(660, 120); // mid pitch, short: a neutral "nothing happened" tone for sitting out a catch trial
     updateStatus("No target that round. Nothing to report.");
   } else if (isRangeEligibleMode() && coreHasPendingRangeBreak(state.vergenceRanges, state.roundVergence)) {
     // Running the clock out during the break-recovery descent is the same
@@ -790,7 +794,7 @@ function handleRoundTimeout() {
     // rather than logging a penalized timeout mid-measurement.
     const pdDelta = applyErrorDemandDrop();
     setRoundDebugState("rangeDescent", "-", state.targetSide, pdDelta);
-    beep(500, 70);
+    beep(500, 70); // low, quick blip: a demand step down during range measurement, deliberately softer than an error tone
     updateStatus(`Descending: now ${formatPd(state.currentPd)}Δ. Answer the target when you can fuse it again.`);
   } else {
     const timeoutScore = recordScoringEvent("timeout", state.roundVergence);
@@ -879,7 +883,7 @@ function onKeyDown(event) {
     if (rangeEligible && coreHasPendingRangeBreak(state.vergenceRanges, state.roundVergence)) {
       const pdDelta = applyErrorDemandDrop();
       setRoundDebugState("rangeDescent", "space", state.targetSide, pdDelta);
-      beep(500, 70);
+      beep(500, 70); // low, quick blip: a demand step down during range measurement, deliberately softer than an error tone
       updateStatus(`Descending: now ${formatPd(state.currentPd)}Δ. Answer the target when you can fuse it again.`);
       updateHud();
       startRound();
@@ -1056,13 +1060,13 @@ function endSession() {
   if (facility) {
     // Facility is scored on cycles per minute, not a PD target, so completing
     // it is a neutral success rather than a met/not-met verdict.
-    beep(1080, 130);
+    beep(1080, 130); // high, bright chime: the session-complete success tone
     updateStatus(`Facility session complete: ${getFacilityCycles()} cycles (${getFacilityCpm().toFixed(1)} cpm).${saveWarning}`, !historySaved);
   } else if (reachedGoal) {
-    beep(1080, 130);
+    beep(1080, 130); // high, bright chime: the same success tone for meeting the target
     updateStatus(`Session complete. Target met: best ${formatPd(state.bestPd)}Δ (target ${formatPd(state.goalPd)}Δ).${saveWarning}`, !historySaved);
   } else {
-    beep(660, 140);
+    beep(660, 140); // mid pitch, longer: a flatter "session over, target missed" tone, no celebration
     updateStatus(`Session complete. Target not met: best ${formatPd(state.bestPd)}Δ (target ${formatPd(state.goalPd)}Δ).${saveWarning}`, true);
   }
 
@@ -1803,7 +1807,7 @@ function pauseSessionForInactivity() {
 
   setStartButtonLabel();
   syncSessionLayoutMode();
-  beep(720, 160);
+  beep(720, 160); // mid pitch, longish: the auto-pause alert, meant to catch your ear when you have stepped away
   updateStatus(`Auto-paused after ${formatInactivityDuration()} without input. Press Resume to continue.`, true);
   updateHud();
   renderScene();
@@ -2238,8 +2242,8 @@ function renderScene() {
 // they never overlap an up/down target. If either fades, that eye is
 // suppressing and the user reports it with S.
 function drawSuppressionMarkers(context, leftEyeCenter, rightEyeCenter, extent) {
-  const offset = extent * 0.25;
-  const size = 6;
+  const offset = extent * 0.25; // sit each vigilance marker a quarter of the field radius above/below center: in view but not crowding the up/down targets
+  const size = 6;               // marker square side in pixels, big enough to notice fading yet small enough not to distract
   context.fillStyle = getLeftDotColor();
   context.fillRect(leftEyeCenter.x - size / 2, leftEyeCenter.y - offset - size / 2, size, size);
   context.fillStyle = getRightDotColor();
@@ -2247,7 +2251,9 @@ function drawSuppressionMarkers(context, leftEyeCenter, rightEyeCenter, extent) 
 }
 
 function drawStereoFieldGlow(context, leftEyeCenter, rightEyeCenter, fieldGeometry) {
-  const extent = fieldGeometry.extent * 1.02;
+  const extent = fieldGeometry.extent * 1.02; // draw the glow a hair (2%) larger than the field so it reads as a soft halo just past the edge
+  // Faint red halo for the left-eye field. Alpha 0.09 is barely-there, so it
+  // hints at the region without competing with the dots.
   context.fillStyle = "rgba(255, 64, 64, 0.09)";
   if (fieldGeometry.shape === "square") {
     context.fillRect(leftEyeCenter.x - extent, leftEyeCenter.y - extent, extent * 2, extent * 2);
@@ -2257,7 +2263,7 @@ function drawStereoFieldGlow(context, leftEyeCenter, rightEyeCenter, fieldGeomet
     context.fill();
   }
 
-  context.fillStyle = "rgba(60, 184, 255, 0.09)";
+  context.fillStyle = "rgba(60, 184, 255, 0.09)"; // matching faint cyan halo for the right-eye field, same barely-there alpha
   if (fieldGeometry.shape === "square") {
     context.fillRect(rightEyeCenter.x - extent, rightEyeCenter.y - extent, extent * 2, extent * 2);
   } else {
@@ -3233,13 +3239,13 @@ function beep(freq, durationMs) {
 }
 
 function playPositiveFeedbackBeep() {
-  beep(700, 90);
-  setTimeout(() => beep(880, 110), 95);
+  beep(700, 90);                        // two rising tones (700 Hz up to 880 Hz): the "correct" chirp
+  setTimeout(() => beep(880, 110), 95); // second tone fires ~95 ms later so the pair reads as one rising cue, not a chord
 }
 
 function playNegativeFeedbackBeep() {
-  beep(320, 95);
-  setTimeout(() => beep(220, 125), 98);
+  beep(320, 95);                         // two falling low tones (320 Hz down to 220 Hz): the "wrong / miss" buzz
+  setTimeout(() => beep(220, 125), 98);  // second tone fires ~98 ms later, again sequenced so the pair reads as one falling cue
 }
 
 function isTrainingActive() {

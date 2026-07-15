@@ -30,8 +30,10 @@
   function createRng(seed) {
     let state = seed >>> 0;
     return () => {
+      // A linear congruential generator with the classic Numerical Recipes
+      // multiplier and increment: a fast, seedable, repeatable pseudo-random stream.
       state = (state * 1664525 + 1013904223) >>> 0;
-      return state / 4294967296;
+      return state / 4294967296; // divide by 2^32 to map the 32-bit state into the range [0, 1)
     };
   }
 
@@ -50,6 +52,9 @@
 
   function resolveRandomJumpVergence(round, sequenceSeed) {
     const safeRound = Math.max(1, Math.trunc(round) || 1);
+    // 0x9e3779b1 is the golden-ratio hash constant; multiplying by it scrambles
+    // the round number and session seed together so each round's direction looks
+    // random yet replays the same way from the same seed.
     const mixedSeed = (Math.imul(safeRound, 0x9e3779b1) ^ ((sequenceSeed || 0) >>> 0)) >>> 0;
     return createRng(mixedSeed)() < 0.5 ? "convergence" : "divergence";
   }
@@ -116,7 +121,7 @@
   // few diopters more. At a typical 40cm read distance this lands on the
   // published near base-in break norm of about 21.
   function getDivergenceCeilingPd(viewDistanceIn, ipdCm, marginPd) {
-    const distanceM = viewDistanceIn * 0.0254;
+    const distanceM = viewDistanceIn * 0.0254; // 0.0254 converts inches to meters
     if (!Number.isFinite(distanceM) || distanceM <= 0) return marginPd;
     return ipdCm / distanceM + marginPd;
   }
@@ -124,21 +129,21 @@
   function getMmPerPixel(monitorWidthIn, screenWidthPx) {
     if (!Number.isFinite(monitorWidthIn) || monitorWidthIn <= 0) return 0;
     if (!Number.isFinite(screenWidthPx) || screenWidthPx <= 0) return 0;
-    return (monitorWidthIn * 25.4) / screenWidthPx;
+    return (monitorWidthIn * 25.4) / screenWidthPx; // 25.4 converts inches to millimeters, giving millimeters of real screen per horizontal pixel
   }
 
   function splitPxToPd(splitPx, monitorWidthIn, viewDistanceIn, screenWidthPx) {
     const mmPerPx = getMmPerPixel(monitorWidthIn, screenWidthPx);
-    const distanceM = viewDistanceIn * 0.0254;
+    const distanceM = viewDistanceIn * 0.0254; // 0.0254 converts inches to meters
     if (mmPerPx <= 0 || distanceM <= 0) return 0;
 
-    const displacementCm = (splitPx * mmPerPx) / 10;
+    const displacementCm = (splitPx * mmPerPx) / 10; // pixels times mm-per-pixel gives millimeters; divide by 10 to get centimeters
     return displacementCm / distanceM;
   }
 
   function pdToSplitPx(pd, monitorWidthIn, viewDistanceIn, screenWidthPx) {
     const mmPerPx = getMmPerPixel(monitorWidthIn, screenWidthPx);
-    const distanceM = viewDistanceIn * 0.0254;
+    const distanceM = viewDistanceIn * 0.0254; // 0.0254 converts inches to meters
     if (mmPerPx <= 0 || distanceM <= 0) return 0;
 
     const displacementCm = pd * distanceM;
@@ -313,6 +318,8 @@
   }
 
   function getCanvasViewportSize(canvas, fallbackWidth, fallbackHeight) {
+    // 680 matches the canvas's declared width in index.html; it is used only if
+    // the element cannot report a real size yet (for example before first layout).
     const safeFallbackWidth = Number.isFinite(fallbackWidth) && fallbackWidth > 0 ? fallbackWidth : 680;
     const safeFallbackHeight = Number.isFinite(fallbackHeight) && fallbackHeight > 0 ? fallbackHeight : safeFallbackWidth;
     const rect = canvas?.getBoundingClientRect?.();
@@ -341,7 +348,7 @@
   }
 
   function getFieldExtent(width, height, ratio) {
-    const safeRatio = Number.isFinite(ratio) && ratio > 0 ? ratio : 0.34;
+    const safeRatio = Number.isFinite(ratio) && ratio > 0 ? ratio : 0.34; // 0.34 is the large field-size ratio, used if a caller passes no ratio
     return Math.min(width, height) * safeRatio;
   }
 

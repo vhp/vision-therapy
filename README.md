@@ -18,6 +18,7 @@ Browser-based vergence training prototype using red/cyan anaglyph random-dot ste
   - Append `?autorun=1` to start the suite automatically (useful for headless runs).
 - `tests/browser-smoke.html`
   - Opens a browser smoke harness that loads the real app and verifies all vergence modes, both field shapes, vertical polarity persistence, debug hotkeys, arrow-key response, timeout transition locking, timeout-transition pause/resume behavior, reset during timeout transition, focus-loss auto-pause, and pause/resume behavior.
+  - It also covers catch trials, the smooth-vergence ramp, break/recovery range measurement, session history import/export and recovery from corrupt saved history, and ending a session when the display context changes.
   - The harness runs with short test values (`Round Seconds = 5`, `Session Minutes = 1`) so the real timers stay visible but the suite finishes quickly.
   - Use a local static server for the smoke harness; direct `file://` loading is intentionally blocked so the test always runs in a supported same-origin setup.
 - `make smoke`
@@ -105,7 +106,7 @@ Browser-based vergence training prototype using red/cyan anaglyph random-dot ste
 - `Monitor Width` is a hard requirement before first start.
 - Use the `Confirm` / `Reconfirm` control next to `Monitor Width` to acknowledge the current value.
 - Once set, monitor width is cached in browser `localStorage` and reused.
-- If the app detects a display-context change (for example monitor resolution or device pixel ratio), monitor width must be reconfirmed before starting again.
+- If the app detects a display-context change (for example a move to another monitor, a resolution change, or a browser-zoom change to the device pixel ratio), monitor width must be reconfirmed. If this happens while a session is running or paused, that session ends first, keeping the work already recorded, because the calibration it was training against no longer holds.
 - `Field Shape` changes only the outer stereogram field between `Circle` and `Square`.
 - `Field Size` shrinks the whole stereogram field (`Large` / `Medium` /
   `Small`). A smaller field gives less peripheral fusion support and is
