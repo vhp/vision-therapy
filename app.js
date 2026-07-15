@@ -441,6 +441,14 @@ let audioCtx = null;
 let wasFullscreenActive = isFullscreenActive();
 let viewportRefreshFrameId = null;
 
+// Entering DOM fullscreen (notably in Firefox) fires a transient window blur as
+// focus reshuffles, which would trip the focus-loss auto-pause and drop us
+// straight back out of fullscreen. Ignore a focus-loss that lands in this grace
+// window right after we request fullscreen, but only while fullscreen actually
+// engaged, so a genuine tab-switch still pauses.
+const FULLSCREEN_ENTRY_GRACE_MS = 700;
+let fullscreenEntryGraceUntil = 0;
+
 // Trend chart palette validated for CVD separation and contrast on #121212.
 const TREND_SERIES = Object.freeze([
   { key: "bestPd", label: "Best PD", color: "#28a878" },
@@ -2485,6 +2493,8 @@ function requestFullscreenOnStart() {
 
   if (!request) return Promise.resolve();
 
+  fullscreenEntryGraceUntil = performance.now() + FULLSCREEN_ENTRY_GRACE_MS;
+
   try {
     const result = request.call(target);
     if (result && typeof result.then === "function") {
@@ -2561,8 +2571,16 @@ function onFullscreenChange() {
 
 function pauseSessionForFocusLoss() {
   if (!state.running) return;
+  if (isFullscreenEntryTransient()) return;
   pauseSessionByUser("Session auto-paused after the app lost focus. Press Resume or P to continue.");
   exitFullscreenIfActive();
+}
+
+// A focus-loss is the fullscreen entry's own transient blur when it lands in
+// the grace window and fullscreen is genuinely active. That combination never
+// happens on a real tab-switch away, so those still pause.
+function isFullscreenEntryTransient() {
+  return performance.now() < fullscreenEntryGraceUntil && isFullscreenActive();
 }
 
 function onVisibilityChange() {
