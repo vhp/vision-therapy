@@ -735,8 +735,12 @@ function startRound() {
   // A catch trial shows no real target; the honest response is Space. Answering
   // a direction is a false alarm, which flags guessing. Facility and smooth
   // modes are exempt: catch rounds would deflate cycles-per-minute in one and
-  // collide with Space's break-report meaning in the other.
-  state.catchTrial = isCatchEligibleMode() && Math.random() < CATCH_PROBABILITY;
+  // collide with Space's break-report meaning in the other. A round mid
+  // break-recovery descent is also exempt: hiding the target there would stall
+  // the descent and misread the user's Space press as a catch response.
+  const rangeDescentPending = isRangeEligibleMode() &&
+    coreHasPendingRangeBreak(state.vergenceRanges, state.roundVergence);
+  state.catchTrial = isCatchEligibleMode() && !rangeDescentPending && Math.random() < CATCH_PROBABILITY;
   state.roundSeed = ((Math.random() * 0xffffffff) | 0) >>> 0;
   state.roundStartTs = now;
   state.roundEndTs = state.roundStartTs + state.roundDurationMs;
