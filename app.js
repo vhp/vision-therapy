@@ -1748,8 +1748,7 @@ function applySmoothRampTick() {
     getScreenWidthPx(),
     SPLIT_GAIN_PX_PER_STEP
   );
-  const rampCapPd = getModePdCap(state.vergenceMode, state.viewDistanceIn);
-  const maxDifficultySteps = pdToDifficultySteps(rampCapPd, state.monitorWidthIn, state.viewDistanceIn);
+  const maxDifficultySteps = getMaxDifficultySteps();
   state.difficultySteps = coreClampDifficultySteps(state.difficultySteps + rampSteps, maxDifficultySteps);
   state.currentPd = difficultyToPd(state.difficultySteps, state.monitorWidthIn, state.viewDistanceIn);
   renderScene();
@@ -1787,11 +1786,41 @@ function applyPdDelta(pdDelta) {
 
 function applyDifficultyDelta(deltaSteps) {
   const beforePd = difficultyToPd(state.difficultySteps, state.monitorWidthIn, state.viewDistanceIn);
-  const demandCapPd = getModePdCap(state.vergenceMode, state.viewDistanceIn);
-  const maxDifficultySteps = pdToDifficultySteps(demandCapPd, state.monitorWidthIn, state.viewDistanceIn);
+  const maxDifficultySteps = getMaxDifficultySteps();
   state.difficultySteps = coreClampDifficultySteps(state.difficultySteps + deltaSteps, maxDifficultySteps);
   state.currentPd = difficultyToPd(state.difficultySteps, state.monitorWidthIn, state.viewDistanceIn);
   return state.currentPd - beforePd;
+}
+
+// Demand is capped two ways: by physiology (getModePdCap) and by what the
+// current canvas can actually draw. The background field center shifts by half
+// the split per eye, so past a certain demand the floating target slides off
+// the canvas edge and the round becomes unanswerable, quietly poisoning the
+// score and the break/recovery measurements. The render cap keeps the target
+// on screen at every demand the session can reach.
+function getMaxDifficultySteps() {
+  const physiologySteps = pdToDifficultySteps(
+    getModePdCap(state.vergenceMode, state.viewDistanceIn),
+    state.monitorWidthIn,
+    state.viewDistanceIn
+  );
+  return Math.min(physiologySteps, getMaxRenderableDifficultySteps());
+}
+
+// The largest background split, expressed in difficulty steps, that still keeps
+// the floating target fully on the canvas. The worst case is a target on the
+// split axis: its center sits (TARGET_OFFSET_RATIO + TARGET_HALF_SIZE_RATIO) of
+// the field radius out from the shifted field center, plus the edge padding, so
+// twice that reach must clear the canvas span along the active axis.
+function getMaxRenderableDifficultySteps() {
+  const viewport = getCanvasMetrics();
+  const fieldExtent = getFieldExtent();
+  const axisSpan = getVergenceAxis(getDisplayRoundVergence()) === "vertical"
+    ? viewport.cssHeight
+    : viewport.cssWidth;
+  const targetReach = fieldExtent * (TARGET_OFFSET_RATIO + TARGET_HALF_SIZE_RATIO) + TARGET_EDGE_PADDING_PX;
+  const maxSplitPx = Math.max(0, axisSpan - 2 * targetReach);
+  return Math.max(0, (maxSplitPx - BASE_TOTAL_SPLIT_PX) / SPLIT_GAIN_PX_PER_STEP);
 }
 
 function pauseSessionForInactivity() {
