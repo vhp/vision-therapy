@@ -87,6 +87,21 @@ test("difficulty and PD conversions round trip", () => {
   assert(Math.abs(recoveredPd - targetPd) < 1e-9);
 });
 
+test("pixel-to-prism-diopter conversion is anchored to an absolute value", () => {
+  // 24in wide over 1920px is 0.3175 mm/px; 100px of split at a 16in (0.4064m)
+  // distance is 3.175cm of displacement, i.e. 3.175 / 0.4064 = 7.8125 PD. A
+  // round-trip test alone would hide a systematic units slip (e.g. cm vs mm),
+  // so pin the absolute number here.
+  assert(Math.abs(core.getMmPerPixel(24, 1920) - 0.3175) < 1e-9);
+  assert(Math.abs(core.splitPxToPd(100, 24, 16, 1920) - 7.8125) < 1e-9);
+  assert(Math.abs(core.pdToSplitPx(7.8125, 24, 16, 1920) - 100) < 1e-9);
+
+  // Degenerate inputs return 0 rather than Infinity or NaN.
+  assert.equal(core.getMmPerPixel(0, 1920), 0);
+  assert.equal(core.splitPxToPd(100, 24, 0, 1920), 0);
+  assert.equal(core.pdToSplitPx(10, 24, 16, 0), 0);
+});
+
 test("PD deltas convert to difficulty steps that reproduce the same PD change", () => {
   const monitorWidthIn = 24;
   const viewDistanceIn = 16;
