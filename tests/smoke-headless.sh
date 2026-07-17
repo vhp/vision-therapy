@@ -27,6 +27,14 @@ work_dir="$(mktemp -d)"
 server_pid=""
 browser_pid=""
 
+# Refuse to run if something already answers on the port. Otherwise our own
+# server would fail to bind, exit, and the health check below would silently
+# pass against the foreign server, testing whatever content it happens to serve.
+if curl -fsS -o /dev/null "http://localhost:${PORT}/" 2>/dev/null; then
+  echo "Port ${PORT} is already in use; set PORT to a free port and retry." >&2
+  exit 1
+fi
+
 cleanup() {
   if [ -n "$browser_pid" ]; then
     kill "$browser_pid" 2>/dev/null || true
@@ -76,6 +84,11 @@ server_pid=$!
 health_url="http://localhost:${PORT}/tests/browser-smoke.html"
 tries=0
 until curl -fsS -o /dev/null "$health_url" 2>/dev/null; do
+  if ! kill -0 "$server_pid" 2>/dev/null; then
+    echo "Static server exited before it came up on port ${PORT}." >&2
+    cat "$work_dir/server.log" >&2 || true
+    exit 1
+  fi
   tries=$((tries + 1))
   if [ "$tries" -ge 50 ]; then
     echo "Static server did not come up on port ${PORT}." >&2

@@ -17,6 +17,11 @@ check:
 	node --check vergence-core.js
 	node --check tests/vergence-core.test.js
 	node --check tests/browser-smoke.js
+	@if command -v shellcheck >/dev/null 2>&1; then \
+		shellcheck tests/smoke-headless.sh; \
+	else \
+		echo "shellcheck not found; skipping shell lint of tests/smoke-headless.sh"; \
+	fi
 
 test:
 	node --test
