@@ -676,20 +676,24 @@ function queueViewportRefresh() {
   });
 }
 
+// A display-context change (browser zoom, a move to another monitor, a
+// resolution change) invalidates the pixel-to-prism-diopter calibration the
+// session is training against. Running past it trains on stale numbers, so end
+// the session here, keep the work already recorded, and force a reconfirm
+// before the next start. Returns true when it ended the session.
+function endRunForDisplayContextChange() {
+  if (!state.running || !detectDisplayContextChange()) return false;
+  clearPendingNextRound();
+  state.resumeStartsNextRound = false;
+  endSession();
+  syncMonitorWidthSetupUi();
+  updateStatus(`Session ended: ${getMonitorWidthBlockedMessage()}`, true);
+  return true;
+}
+
 function refreshViewport() {
   state.nowTs = performance.now();
-  // A resize can carry a display-context change (browser zoom, a move to
-  // another monitor). Running past it would train the rest of the session on
-  // stale calibration, so end it here, keeping the work already recorded, and
-  // force a reconfirm before the next start.
-  if (state.running && detectDisplayContextChange()) {
-    clearPendingNextRound();
-    state.resumeStartsNextRound = false;
-    endSession();
-    syncMonitorWidthSetupUi();
-    updateStatus(`Session ended: ${getMonitorWidthBlockedMessage()}`, true);
-    return;
-  }
+  if (endRunForDisplayContextChange()) return;
   state.dots = buildDotField(getCurrentDotCount(), getFieldExtent(), state.roundSeed || 1001, state.visualTuning);
   updateHud();
   renderScene();
@@ -751,6 +755,10 @@ function startRoundTicker() {
   stopRoundTicker();
   tickIntervalId = setInterval(() => {
     state.nowTs = performance.now();
+
+    // Catch a display change that arrives without a resize event, e.g. dragging
+    // the window to a same-DPR monitor of a different resolution.
+    if (endRunForDisplayContextChange()) return;
 
     if (state.nowTs - state.lastResponseTs >= INACTIVITY_PAUSE_MS) {
       pauseSessionForInactivity();
