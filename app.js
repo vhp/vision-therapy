@@ -1195,7 +1195,7 @@ function readConfigInputs() {
     Number.parseFloat(rightDotIntensityInput.value), MIN_DOT_INTENSITY, MAX_DOT_INTENSITY, DEFAULT_RIGHT_DOT_INTENSITY
   );
   const startPd = clampInt(startPdRaw, 0, ABSOLUTE_PD_MAX, DEFAULT_START_PD);
-  const goalCapPd = Math.floor(getModePdCap(vergenceMode, viewDistanceIn));
+  const goalCapPd = Math.floor(getGoalPdCap(vergenceMode, viewDistanceIn, fieldSize, monitorWidthIn));
   const goalPd = clampInt(goalPdRaw, 1, goalCapPd, Math.min(DEFAULT_GOAL_PD, goalCapPd));
   const sessionMinutes = clampInt(sessionMinutesRaw, 1, ABSOLUTE_SESSION_MINUTES_MAX, DEFAULT_SESSION_MINUTES);
   const roundSeconds = clampInt(roundSecondsRaw, MIN_ROUND_SECONDS, MAX_ROUND_SECONDS, DEFAULT_ROUND_SECONDS);
@@ -1336,7 +1336,7 @@ function applyConfigInputs(config) {
   redLensSideInput.value = normalizeRedLensSide(config.redLensSide);
   visualPresetInput.value = normalizeVisualPreset(config.visualPreset);
   startPdInput.value = String(config.startPd);
-  goalPdInput.max = String(Math.floor(getModePdCap(config.vergenceMode, config.viewDistanceIn)));
+  goalPdInput.max = String(Math.floor(getGoalPdCap(config.vergenceMode, config.viewDistanceIn, config.fieldSize, config.monitorWidthIn)));
   goalPdInput.value = String(config.goalPd);
   sessionMinutesInput.value = String(config.sessionMinutes);
   roundSecondsInput.value = String(config.roundSeconds);
@@ -1559,7 +1559,7 @@ function applyConfigToState(config) {
   state.viewDistanceIn = config.viewDistanceIn;
   state.leftDotIntensity = config.leftDotIntensity;
   state.rightDotIntensity = config.rightDotIntensity;
-  const startPdCapped = Math.min(config.startPd, getModePdCap(config.vergenceMode, config.viewDistanceIn));
+  const startPdCapped = Math.min(config.startPd, getGoalPdCap(config.vergenceMode, config.viewDistanceIn, config.fieldSize, config.monitorWidthIn));
   state.difficultySteps = pdToDifficultySteps(startPdCapped, config.monitorWidthIn, config.viewDistanceIn);
   state.currentPd = difficultyToPd(state.difficultySteps, state.monitorWidthIn, state.viewDistanceIn);
   state.bestPd = state.currentPd;
@@ -1833,6 +1833,38 @@ function getMaxRenderableDifficultySteps() {
   const targetReach = fieldExtent * (TARGET_OFFSET_RATIO + TARGET_HALF_SIZE_RATIO) + TARGET_EDGE_PADDING_PX;
   const maxSplitPx = Math.max(0, axisSpan - 2 * targetReach);
   return Math.max(0, (maxSplitPx - BASE_TOTAL_SPLIT_PX) / SPLIT_GAIN_PX_PER_STEP);
+}
+
+// The fullscreen session canvas is min(96vw, 96vh) (see styles.css), larger
+// than the idle setup canvas, so a goal must be judged against the size the
+// session will actually run at, projected from the screen rather than measured
+// from the current small canvas.
+function getProjectedSessionSpanPx() {
+  const screenW = Number(window.screen?.width) || window.innerWidth || 0;
+  const screenH = Number(window.screen?.height) || window.innerHeight || 0;
+  const projected = 0.96 * Math.min(screenW, screenH);
+  return projected > 0 ? projected : getCanvasMetrics().cssWidth;
+}
+
+// Highest demand, in prism diopters, whose background split still keeps the
+// target on that fullscreen canvas. Goals above this can never be met.
+function getRenderablePdCap(fieldSize, monitorWidthIn, viewDistanceIn) {
+  const span = getProjectedSessionSpanPx();
+  const fieldExtent = coreGetFieldExtent(span, span, FIELD_SIZE_RATIOS[normalizeFieldSize(fieldSize)]);
+  const targetReach = fieldExtent * (TARGET_OFFSET_RATIO + TARGET_HALF_SIZE_RATIO) + TARGET_EDGE_PADDING_PX;
+  const maxSplitPx = Math.max(0, span - 2 * targetReach);
+  const steps = Math.max(0, (maxSplitPx - BASE_TOTAL_SPLIT_PX) / SPLIT_GAIN_PX_PER_STEP);
+  return difficultyToPd(steps, monitorWidthIn, viewDistanceIn);
+}
+
+// Ceiling for a session goal or start demand: the lower of the physiologic
+// limit and what the session canvas can actually render, so a goal is never set
+// beyond what any round could reach.
+function getGoalPdCap(mode, viewDistanceIn, fieldSize, monitorWidthIn) {
+  return Math.min(
+    getModePdCap(mode, viewDistanceIn),
+    getRenderablePdCap(fieldSize, monitorWidthIn, viewDistanceIn)
+  );
 }
 
 function pauseSessionForInactivity() {
