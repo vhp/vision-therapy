@@ -15,7 +15,7 @@ window.APP_CONFIG = Object.freeze({
   CATCH_TRIAL_PROBABILITY: 0.15,    // chance an eligible round is a catch trial with no real target; roughly 1 in 7 catches guessing without being annoying
   VERTICAL_PD_CAP: 8,               // ceiling for the vertical modes, in prism diopters; vertical fusional range is only a few diopters, so demand stays low
   INACTIVITY_PAUSE_MS: 5 * 60_000,  // auto-pause after this long with no input (5 minutes) so walking away does not burn the session clock
-  NEXT_ROUND_DELAY_MS: 380,         // short gap between rounds, in milliseconds, so the feedback beep and the next stereogram do not blur together
+  NEXT_ROUND_DELAY_MS: 380,         // gap after a round times out, in milliseconds, before the next stereogram, so the timeout beep and the next round do not blur together (answered rounds advance immediately)
   CONFIG_STORAGE_KEY: "vergence_trainer.config.v1",   // localStorage key your saved settings live under
   HISTORY_STORAGE_KEY: "vergence_trainer.history.v1", // localStorage key your saved session history lives under
   HISTORY_MAX_ENTRIES: 200,         // how many past sessions to keep; older ones are dropped so storage cannot grow forever
