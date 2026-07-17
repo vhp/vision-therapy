@@ -12,6 +12,12 @@
 # it to exit on its own: headless Chrome tends to linger idle after the page
 # settles, which would otherwise make every run take the full timeout.
 #
+# Every blocking stage is bounded so a run always terminates on its own without
+# a manual kill: the health check gives up after ~10s (or the moment the server
+# dies), the browser poll gives up at SMOKE_TIMEOUT, network calls carry
+# --max-time, and the browser teardown escalates to SIGKILL instead of waiting
+# on a process that ignores SIGTERM.
+#
 # Usage: tests/smoke-headless.sh   (or: make smoke)
 # Env:   PORT (default 4173), PYTHON (default python3), CHROME (browser path),
 #        SMOKE_TIMEOUT (seconds, default 180)
@@ -30,7 +36,7 @@ browser_pid=""
 # Refuse to run if something already answers on the port. Otherwise our own
 # server would fail to bind, exit, and the health check below would silently
 # pass against the foreign server, testing whatever content it happens to serve.
-if curl -fsS -o /dev/null "http://localhost:${PORT}/" 2>/dev/null; then
+if curl -fsS --max-time 5 -o /dev/null "http://localhost:${PORT}/" 2>/dev/null; then
   echo "Port ${PORT} is already in use; set PORT to a free port and retry." >&2
   exit 1
 fi
@@ -42,9 +48,17 @@ cleanup() {
   if [ -n "$server_pid" ]; then
     kill "$server_pid" 2>/dev/null || true
   fi
+  # Force-kill anything that ignored SIGTERM so cleanup itself cannot hang.
+  sleep 0.3
+  [ -n "$browser_pid" ] && kill -9 "$browser_pid" 2>/dev/null || true
+  [ -n "$server_pid" ] && kill -9 "$server_pid" 2>/dev/null || true
   rm -rf "$work_dir"
 }
 trap cleanup EXIT
+# On Ctrl-C or a kill, exit cleanly so the EXIT trap tears everything down
+# instead of leaving the server or browser running.
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 find_browser() {
   local candidates=(
@@ -83,7 +97,7 @@ server_pid=$!
 
 health_url="http://localhost:${PORT}/tests/browser-smoke.html"
 tries=0
-until curl -fsS -o /dev/null "$health_url" 2>/dev/null; do
+until curl -fsS --max-time 5 -o /dev/null "$health_url" 2>/dev/null; do
   if ! kill -0 "$server_pid" 2>/dev/null; then
     echo "Static server exited before it came up on port ${PORT}." >&2
     cat "$work_dir/server.log" >&2 || true
@@ -123,6 +137,17 @@ while kill -0 "$browser_pid" 2>/dev/null; do
   sleep 0.5
 done
 kill "$browser_pid" 2>/dev/null || true
+# Force-kill if it ignores SIGTERM, so a lingering browser cannot block the
+# wait below and wedge the run.
+kill_wait=0
+while kill -0 "$browser_pid" 2>/dev/null; do
+  kill_wait=$((kill_wait + 1))
+  if [ "$kill_wait" -ge 15 ]; then
+    kill -9 "$browser_pid" 2>/dev/null || true
+    break
+  fi
+  sleep 0.2
+done
 wait "$browser_pid" 2>/dev/null || true
 browser_pid=""
 
