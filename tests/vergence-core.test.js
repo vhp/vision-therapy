@@ -220,6 +220,19 @@ test("csv fields are quoted and formula-guarded without mangling numbers", () =>
   assert.equal(core.csvEscapeField("=1+2,3"), '"\'=1+2,3"');
 });
 
+test("clamp helpers fall back on any non-finite input", () => {
+  assert.equal(core.clampInt(5, 0, 10, 99), 5);
+  assert.equal(core.clampInt(Number.NaN, 0, 10, 99), 99);
+  assert.equal(core.clampInt(undefined, 0, 10, 99), 99);
+  assert.equal(core.clampInt(Infinity, 0, 10, 99), 99);
+  assert.equal(core.clampInt(-Infinity, 0, 10, 99), 99);
+
+  assert.equal(core.clampFloat(2.5, 0, 10, 99), 2.5);
+  assert.equal(core.clampFloat(Number.NaN, 0, 10, 99), 99);
+  assert.equal(core.clampFloat(undefined, 0, 10, 99), 99);
+  assert.equal(core.clampFloat(Infinity, 0, 10, 99), 99);
+});
+
 test("difficulty steps clamp to the allowed range", () => {
   assert.equal(core.clampDifficultySteps(-2, 50), 0);
   assert.equal(core.clampDifficultySteps(12.5, 50), 12.5);

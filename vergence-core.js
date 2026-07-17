@@ -8,12 +8,12 @@
   }
 })(typeof globalThis !== "undefined" ? globalThis : this, function createVergenceCore() {
   function clampInt(value, min, max, fallback) {
-    if (Number.isNaN(value)) return fallback;
+    if (!Number.isFinite(value)) return fallback;
     return Math.min(max, Math.max(min, value));
   }
 
   function clampFloat(value, min, max, fallback) {
-    if (Number.isNaN(value)) return fallback;
+    if (!Number.isFinite(value)) return fallback;
     return Math.min(max, Math.max(min, value));
   }
 
