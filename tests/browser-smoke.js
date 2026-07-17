@@ -49,6 +49,16 @@ const MODE_SCENARIOS = [
     verifyResumeDisplayChange: true
   },
   {
+    label: "Convergence / Scoring and Completion",
+    vergenceMode: "convergence",
+    fieldShape: "square",
+    verticalPolarity: "standard",
+    expectedInitialExercises: ["Convergence"],
+    expectedNextExercises: ["Convergence"],
+    expectedAxis: "H",
+    verifyScoringAndCompletion: true
+  },
+  {
     label: "Divergence / Circle",
     vergenceMode: "divergence",
     fieldShape: "circle",
@@ -320,6 +330,11 @@ function getTargetArrow(targetSide) {
     left: { code: "ArrowLeft", key: "ArrowLeft" }
   };
   return arrowMap[targetSide] || null;
+}
+
+function getNonTargetArrow(targetSide) {
+  const wrongSide = ["up", "right", "down", "left"].find(side => side !== targetSide) || "up";
+  return getTargetArrow(wrongSide);
 }
 
 function assertOneOf(actual, expectedValues, label) {
@@ -715,6 +730,48 @@ async function verifyRangeDescent(frameWindow, frameDocument, debugStatusEl) {
   });
 }
 
+// Exercises the parts of a live session the other scenarios skip: a wrong
+// answer (score -1, demand drops), the 3-down/1-up staircase step-up, and a
+// session running to its natural end so the summary card and a history row
+// appear.
+async function verifyScoringAndCompletion(frameWindow, frameDocument, debugStatusEl, startBtn) {
+  const roundEl = frameDocument.getElementById("round");
+  const prismEl = frameDocument.getElementById("prism");
+  const readPd = () => Number.parseFloat(String(prismEl.textContent || "").replace(/[^\d.]/g, ""));
+
+  // Three correct answers in a row must raise demand once (the step-up).
+  const pdBeforeStreak = readPd();
+  for (let i = 0; i < 3; i += 1) {
+    await answerCurrentRoundCorrectly(frameWindow, frameDocument, debugStatusEl);
+  }
+  const pdAfterStreak = readPd();
+  if (!(pdAfterStreak > pdBeforeStreak)) {
+    throw new Error(`Staircase step-up failed: PD did not rise after 3 correct (${pdBeforeStreak} -> ${pdAfterStreak})`);
+  }
+
+  // A wrong answer costs one point and steps demand back down.
+  const beforeWrong = parseDebugStatus(debugStatusEl.textContent);
+  const totalBeforeWrong = Number(beforeWrong.total);
+  const pdBeforeWrong = readPd();
+  const roundBeforeWrong = Number(roundEl.textContent);
+  const wrong = getNonTargetArrow(beforeWrong.target);
+  dispatchKey(frameWindow, wrong.code, wrong.key);
+  await waitFor("wrong answer advances the round", () => Number(roundEl.textContent) > roundBeforeWrong);
+  await waitFor("wrong answer costs a point and drops demand", () => {
+    const d = parseDebugStatus(debugStatusEl.textContent);
+    return Number(d.total) === totalBeforeWrong - 1 && readPd() < pdBeforeWrong;
+  });
+
+  // Let the remaining rounds time out so the session ends on its own, then
+  // confirm the summary card and a new history row appear.
+  const summaryCard = frameDocument.getElementById("summaryCard");
+  const historyBody = frameDocument.getElementById("historyTableBody");
+  await waitFor("session completes on its own", () =>
+    !summaryCard.classList.contains("hidden") &&
+    startBtn.textContent === "Start" &&
+    historyBody.children.length >= 1, 75000);
+}
+
 async function verifySuppressionMessage(frameWindow, frameDocument, expectedFragment) {
   const statusEl = frameDocument.getElementById("status");
   dispatchKey(frameWindow, "KeyS", "s");
@@ -1057,6 +1114,12 @@ async function runModeScenario(scenario) {
   if (scenario.verifyCatchTrials) {
     await verifyCatchTrials(frameWindow, frameDocument, debugStatusEl);
     recordResult("pass", `${scenario.label}: false alarms and correct rejections tracked`);
+    return;
+  }
+
+  if (scenario.verifyScoringAndCompletion) {
+    await verifyScoringAndCompletion(frameWindow, frameDocument, debugStatusEl, startBtn);
+    recordResult("pass", `${scenario.label}: wrong answer, staircase step-up, and natural completion verified`);
     return;
   }
 
