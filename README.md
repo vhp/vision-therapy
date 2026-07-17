@@ -102,7 +102,7 @@ Browser-based vergence training prototype using red/cyan anaglyph random-dot ste
 ## Session Setup
 
 - `Core Settings`: `Vergence Mode`, `Visual Preset`, `Session Target PD`, `Session Minutes`.
-- `Advanced Settings`: `Monitor Width`, `View Distance`, `Round Seconds`, `Field Shape`, `Vertical Mode Mapping`, a read-only `Eye Split` (marked `RO`), and debug-only `Start PD`.
+- `Advanced Settings`: `Monitor Width`, `View Distance`, `Round Seconds`, `Field Shape`, `Field Size`, `Red Lens Side`, `Vertical Mode Mapping`, `Red Dot Intensity`, `Cyan Dot Intensity`, a read-only `Eye Split` (marked `RO`), and debug-only `Start PD`.
 - `Monitor Width` is a hard requirement before first start.
 - Use the `Confirm` / `Reconfirm` control next to `Monitor Width` to acknowledge the current value.
 - Once set, monitor width is cached in browser `localStorage` and reused.
