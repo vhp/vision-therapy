@@ -10,35 +10,41 @@ Browser-based vergence training prototype using red/cyan anaglyph random-dot ste
 
 ## Testing
 
-- `node --test`
-  - Runs the no-dependency core regression tests in `tests/vergence-core.test.js`.
-- `python3 -m http.server 4173`
-  - Serves the repo locally so the browser smoke harness can load the app over `http://localhost` instead of `file://`.
-  - Open `http://localhost:4173/tests/browser-smoke.html` and click `Run Smoke Test`.
-  - Append `?autorun=1` to start the suite automatically (useful for headless runs).
-- `tests/browser-smoke.html`
-  - Opens a browser smoke harness that loads the real app and verifies all vergence modes, both field shapes, vertical polarity persistence, debug hotkeys, arrow-key response, timeout transition locking, timeout-transition pause/resume behavior, reset during timeout transition, the reset confirmation, focus-loss auto-pause, the fullscreen session layout releasing on pause, and pause/resume behavior.
-  - It also covers catch trials, the smooth-vergence ramp, break/recovery range measurement, session history import/export and recovery from corrupt saved history, and ending a session when the display context changes.
-  - The harness runs with short test values (`Round Seconds = 5`, `Session Minutes = 1`) so the real timers stay visible but the suite finishes quickly.
-  - Use a local static server for the smoke harness; direct `file://` loading is intentionally blocked so the test always runs in a supported same-origin setup.
+- `make verify`
+  - Runs the syntax checks and the `node:test` suite together. `node --test`
+    alone runs the no-dependency core regression tests in
+    `tests/vergence-core.test.js`. Neither needs a browser; `make smoke` is
+    the separate browser gate.
 - `make smoke`
-  - Runs that same browser smoke suite headlessly and reports pass/fail, so you
-    do not have to open the harness by hand. It serves the repo, drives the app
-    in a headless Chromium-based browser, scrapes the results, and tears the
-    server and all temp files down on the way out, including on failure or
-    Ctrl-C. A normal run finishes in a few seconds.
+  - Runs the browser smoke suite headlessly and reports pass/fail. It serves
+    the repo, drives the app in a headless Chromium-based browser, scrapes the
+    results, and tears the server and all temp files down on the way out,
+    including on failure or Ctrl-C. A normal run finishes in a few seconds.
   - Needs a Chromium-based browser. It looks for Google Chrome or Chromium in
     the usual spots; set `CHROME=/path/to/browser` to point it somewhere else.
   - `PORT` sets the local port (default 4173), and `SMOKE_TIMEOUT` is the
     wall-clock ceiling in seconds before it gives up and reports failure
     (default 180).
-  - Reach for `make serve` and a real browser instead when you want to watch a
-    scenario play out visually.
-- `make verify`
-  - Runs the syntax checks and the `node:test` suite together. It does not need
-    a browser; `make smoke` is the separate browser gate.
 - `make serve`
-  - Starts the local static server on `http://localhost:4173/` and prints the smoke harness URL.
+  - Starts the local static server on `http://localhost:4173/` and prints the
+    smoke harness URL. Use this plus a real browser when you want to watch a
+    scenario play out visually.
+- `tests/browser-smoke.html`
+  - The smoke harness itself. It loads the real app in an iframe and drives
+    every vergence mode plus the delicate lifecycle paths: timeout
+    transitions, pause/resume, focus loss, reset, and display-context
+    changes. It also covers catch trials, the smooth-vergence ramp,
+    break/recovery range measurement, and session history import/export
+    including recovery from corrupt saved history. The scenario list in
+    `tests/browser-smoke.js` is the authoritative inventory.
+  - Open `http://localhost:4173/tests/browser-smoke.html` and click
+    `Run Smoke Test`, or append `?autorun=1` to start automatically.
+  - The harness runs with short test values (`Round Seconds = 5`, `Session
+    Minutes = 1`) so the real timers stay visible but the suite finishes
+    quickly.
+  - Serve it from a local static server; direct `file://` loading is
+    intentionally blocked so the test always runs in a supported same-origin
+    setup.
 
 ## Core Behavior
 
@@ -192,6 +198,6 @@ When paused (for example after `Esc`):
   number of screen pixels apart (`targetSplitPx`, set per visual preset).
   That fixed offset is what makes the square float, and because it never
   changes, the square is just as easy to spot at high demand as at low.
-- The canvas backing store now tracks the rendered canvas size so the displayed vergence demand is not distorted by CSS scaling.
-- `Eye split` is a rendering metric shown as read-only in `Advanced Settings` and in the pause box; it now includes an `H` or `V` axis tag.
+- The canvas backing store tracks the rendered canvas size so CSS scaling does not distort the displayed vergence demand.
+- `Eye split` is a rendering metric shown as read-only in `Advanced Settings` and in the pause box, tagged with an `H` or `V` for the active axis.
 - This project is a prototype, not a medical device.
