@@ -564,13 +564,22 @@ function startSession() {
   // so the target stays reachable.
   let goalCapNote = "";
   if (!isFullscreenActive()) {
-    const windowCapPd = Math.floor(difficultyToPd(getMaxRenderableDifficultySteps(), state.monitorWidthIn, state.viewDistanceIn));
-    if (windowCapPd >= 1 && state.goalPd > windowCapPd) {
+    // Never leave the goal above what the window can render; the floor is 1.
+    const windowCapPd = Math.max(1, Math.floor(difficultyToPd(getMaxRenderableDifficultySteps(), state.monitorWidthIn, state.viewDistanceIn)));
+    if (state.goalPd > windowCapPd) {
       state.goalPd = windowCapPd;
       goalCapNote = " Session target lowered to fit this window; use fullscreen for the full range.";
     }
     state.difficultySteps = coreClampDifficultySteps(state.difficultySteps, getMaxDifficultySteps());
     state.currentPd = difficultyToPd(state.difficultySteps, state.monitorWidthIn, state.viewDistanceIn);
+  }
+
+  // Facility's cycles-per-minute is meaningless if the pair can't render apart.
+  if (isFacilityMode()) {
+    const renderCapPd = difficultyToPd(getMaxDifficultySteps(), state.monitorWidthIn, state.viewDistanceIn);
+    if (renderCapPd < FACILITY_BASE_OUT_PD) {
+      goalCapNote += ` This display renders up to ${formatPd(renderCapPd)}Δ, below the ${formatPd(FACILITY_BASE_OUT_PD)}Δ facility target, so the switch is compressed; use fullscreen or sit closer.`;
+    }
   }
 
   updateStatus(
@@ -580,8 +589,19 @@ function startSession() {
 }
 
 function resetSession() {
-  if (isTrainingActive() && !window.confirm("Reset now? The current session's progress will be discarded.")) {
-    return;
+  if (isTrainingActive()) {
+    const confirmOpenedAt = performance.now();
+    const proceed = window.confirm("Reset now? The current session's progress will be discarded.");
+    if (!proceed) {
+      // Don't charge a running round for the time the modal blocked the clock.
+      const blockedMs = performance.now() - confirmOpenedAt;
+      if (state.running && blockedMs > 0) {
+        state.roundEndTs += blockedMs;
+        state.sessionEndTs += blockedMs;
+        state.lastResponseTs += blockedMs;
+      }
+      return;
+    }
   }
   const config = readConfigInputs();
   applyConfigInputs(config);
@@ -1991,6 +2011,10 @@ function resumeSession() {
   setStartButtonLabel();
   syncSessionLayoutMode();
 
+  // Keep the target on screen if fullscreen re-entry was denied; no-op otherwise.
+  state.difficultySteps = coreClampDifficultySteps(state.difficultySteps, getMaxDifficultySteps());
+  state.currentPd = difficultyToPd(state.difficultySteps, state.monitorWidthIn, state.viewDistanceIn);
+
   if (resumeStartsNextRound) {
     updateStatus("Session resumed. Starting next round.");
     startRound();
@@ -2593,10 +2617,29 @@ function requestFullscreenOnStart() {
     if (result && typeof result.then === "function") {
       return result.catch(() => {});
     }
-    return Promise.resolve();
+    // Prefixed APIs settle asynchronously; wait so callers see the final state.
+    return waitForFullscreenSettle();
   } catch {
     return Promise.resolve();
   }
+}
+
+function waitForFullscreenSettle(timeoutMs = 400) {
+  return new Promise(resolve => {
+    let settled = false;
+    let timerId = null;
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      if (timerId !== null) clearTimeout(timerId);
+      document.removeEventListener("fullscreenchange", finish);
+      document.removeEventListener("webkitfullscreenchange", finish);
+      resolve();
+    };
+    document.addEventListener("fullscreenchange", finish);
+    document.addEventListener("webkitfullscreenchange", finish);
+    timerId = setTimeout(finish, timeoutMs);
+  });
 }
 
 function clearPendingNextRound() {
