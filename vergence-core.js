@@ -9,22 +9,12 @@
 })(typeof globalThis !== "undefined" ? globalThis : this, function createVergenceCore() {
   function clampInt(value, min, max, fallback) {
     if (!Number.isFinite(value)) return fallback;
-    return Math.min(max, Math.max(min, value));
+    return Math.min(max, Math.max(min, Math.trunc(value)));
   }
 
   function clampFloat(value, min, max, fallback) {
     if (!Number.isFinite(value)) return fallback;
     return Math.min(max, Math.max(min, value));
-  }
-
-  function sanitizePresetFloat(value, min, max, fallback) {
-    if (!Number.isFinite(value)) return fallback;
-    return Math.min(max, Math.max(min, value));
-  }
-
-  function sanitizePresetInt(value, min, max, fallback) {
-    if (!Number.isFinite(value)) return fallback;
-    return Math.min(max, Math.max(min, Math.trunc(value)));
   }
 
   function createRng(seed) {
@@ -389,8 +379,6 @@
   return Object.freeze({
     clampInt,
     clampFloat,
-    sanitizePresetFloat,
-    sanitizePresetInt,
     createRng,
     getDebugDifficultyDirection,
     resolveRandomJumpVergence,

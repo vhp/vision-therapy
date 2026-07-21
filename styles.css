@@ -279,7 +279,8 @@ body.training-live .instructions {
   transition: opacity 120ms ease;
 }
 
-.setup-grid label.has-tooltip[data-tip]:hover::before {
+.setup-grid label.has-tooltip[data-tip]:hover::before,
+.setup-grid label.has-tooltip[data-tip]:focus-visible::before {
   opacity: 1;
   visibility: visible;
 }
@@ -307,7 +308,8 @@ body.training-live .instructions {
   transition: opacity 120ms ease;
 }
 
-.setup-grid label.has-tooltip:hover .mode-tip-panel {
+.setup-grid label.has-tooltip:hover .mode-tip-panel,
+.setup-grid label.has-tooltip:focus-visible .mode-tip-panel {
   opacity: 1;
   visibility: visible;
 }

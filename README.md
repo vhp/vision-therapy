@@ -17,7 +17,7 @@ Browser-based vergence training prototype using red/cyan anaglyph random-dot ste
   - Open `http://localhost:4173/tests/browser-smoke.html` and click `Run Smoke Test`.
   - Append `?autorun=1` to start the suite automatically (useful for headless runs).
 - `tests/browser-smoke.html`
-  - Opens a browser smoke harness that loads the real app and verifies all vergence modes, both field shapes, vertical polarity persistence, debug hotkeys, arrow-key response, timeout transition locking, timeout-transition pause/resume behavior, reset during timeout transition, focus-loss auto-pause, and pause/resume behavior.
+  - Opens a browser smoke harness that loads the real app and verifies all vergence modes, both field shapes, vertical polarity persistence, debug hotkeys, arrow-key response, timeout transition locking, timeout-transition pause/resume behavior, reset during timeout transition, the reset confirmation, focus-loss auto-pause, the fullscreen session layout releasing on pause, and pause/resume behavior.
   - It also covers catch trials, the smooth-vergence ramp, break/recovery range measurement, session history import/export and recovery from corrupt saved history, and ending a session when the display context changes.
   - The harness runs with short test values (`Round Seconds = 5`, `Session Minutes = 1`) so the real timers stay visible but the suite finishes quickly.
   - Use a local static server for the smoke harness; direct `file://` loading is intentionally blocked so the test always runs in a supported same-origin setup.
@@ -69,6 +69,9 @@ Browser-based vergence training prototype using red/cyan anaglyph random-dot ste
   less when sitting farther back. Vertical modes cap at `VERTICAL_PD_CAP`
   (default 8Δ) since vertical fusional range is only a few diopters.
   Convergence and the mixed jump modes keep the wide generic limit.
+- If a session starts without fullscreen (for example the browser blocked the
+  request), the session target is lowered at start to what that smaller window
+  can render, and the status line says so.
 - Scoring: correct = `+1`; wrong / timeout / space = `-1`.
 - Demand follows a 3-down/1-up staircase: three consecutive correct answers raise
   demand by `PD_GAIN_PER_CORRECT` (0.75Δ); any error lowers it by
@@ -104,6 +107,9 @@ Browser-based vergence training prototype using red/cyan anaglyph random-dot ste
 - `Core Settings`: `Vergence Mode`, `Visual Preset`, `Session Target PD`, `Session Minutes`.
 - `Advanced Settings`: `Monitor Width`, `View Distance`, `Round Seconds`, `Field Shape`, `Field Size`, `Red Lens Side`, `Vertical Mode Mapping`, `Red Dot Intensity`, `Cyan Dot Intensity`, a read-only `Eye Split` (marked `RO`), and debug-only `Start PD`.
 - `Monitor Width` is a hard requirement before first start.
+- Confirm it with browser zoom at 100% (`Cmd/Ctrl+0`). The pixel-to-prism math
+  assumes an unzoomed page, and the app cannot detect zoom that was already
+  applied when you confirmed.
 - Use the `Confirm` / `Reconfirm` control next to `Monitor Width` to acknowledge the current value.
 - Once set, monitor width is cached in browser `localStorage` and reused.
 - If the app detects a display-context change (for example a move to another monitor, a resolution change, or a browser-zoom change to the device pixel ratio), monitor width must be reconfirmed. If this happens while a session is running or paused, that session ends first, keeping the work already recorded, because the calibration it was training against no longer holds.

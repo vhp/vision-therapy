@@ -12,19 +12,17 @@ if (!window.VergenceCore) {
 }
 
 const {
-  clampInt: coreClampInt,
-  clampFloat: coreClampFloat,
-  sanitizePresetFloat: coreSanitizePresetFloat,
-  sanitizePresetInt: coreSanitizePresetInt,
-  createRng: coreCreateRng,
-  getDebugDifficultyDirection: coreGetDebugDifficultyDirection,
+  clampInt,
+  clampFloat,
+  createRng,
+  getDebugDifficultyDirection,
   resolveRoundVergence: coreResolveRoundVergence,
   getVergenceAxis: coreGetVergenceAxis,
   getVerticalPolaritySign: coreGetVerticalPolaritySign,
   getVergenceVector: coreGetVergenceVector,
   getTotalSplitPx: coreGetTotalSplitPx,
   getDivergenceCeilingPd: coreGetDivergenceCeilingPd,
-  normalizeExerciseKey: coreNormalizeExerciseKey,
+  normalizeExerciseKey,
   recordScoringEvent: coreRecordScoringEvent,
   getExerciseScore: coreGetExerciseScore,
   clampDifficultySteps: coreClampDifficultySteps,
@@ -99,19 +97,8 @@ const {
   VISUAL_PRESETS: CONFIGURED_VISUAL_PRESETS
 } = window.APP_CONFIG;
 
-const FALLBACK_VERGENCE_MODES = Object.freeze([
-  { value: "convergence", label: "Convergence" },
-  { value: "divergence", label: "Divergence" },
-  { value: "alternate", label: "Jump Vergence (Alternating)" },
-  { value: "random_jump", label: "Jump Vergence (Random)" },
-  { value: "facility", label: "Vergence Facility (3Δ / 12Δ)" },
-  { value: "smooth", label: "Smooth Vergence (Ramp)" },
-  { value: "vergence_up", label: "Vergence Up" },
-  { value: "vergence_down", label: "Vergence Down" }
-]);
-
 const VERGENCE_MODES = Object.freeze(
-  (Array.isArray(CONFIGURED_VERGENCE_MODES) ? CONFIGURED_VERGENCE_MODES : FALLBACK_VERGENCE_MODES)
+  (Array.isArray(CONFIGURED_VERGENCE_MODES) ? CONFIGURED_VERGENCE_MODES : [])
     .map(mode => {
       const value = typeof mode?.value === "string" ? mode.value : "";
       const label = typeof mode?.label === "string" && mode.label.trim() ? mode.label : value;
@@ -150,15 +137,8 @@ const FALLBACK_VISUAL_PRESET_TUNING = Object.freeze({
   dotMediumSizePx: DOT_MEDIUM_SIZE_PX,
   dotLargeSizePx: DOT_LARGE_SIZE_PX
 });
-const FALLBACK_VISUAL_PRESETS = Object.freeze([
-  {
-    value: "balanced",
-    label: "Balanced",
-    tuning: FALLBACK_VISUAL_PRESET_TUNING
-  }
-]);
 const VISUAL_PRESETS = Object.freeze(
-  (Array.isArray(CONFIGURED_VISUAL_PRESETS) ? CONFIGURED_VISUAL_PRESETS : FALLBACK_VISUAL_PRESETS)
+  (Array.isArray(CONFIGURED_VISUAL_PRESETS) ? CONFIGURED_VISUAL_PRESETS : [])
     .map(normalizeVisualPresetConfig)
     .filter(Boolean)
 );
@@ -303,6 +283,9 @@ const historyImportFile = document.getElementById("historyImportFile");
 const historyClearBtn = document.getElementById("historyClearBtn");
 
 const canvas = document.getElementById("viewer");
+if (!canvas) {
+  throw new Error("Canvas element missing.");
+}
 const ctx = canvas.getContext("2d");
 const DEFAULT_CANVAS_WIDTH = getPositiveInteger(canvas?.getAttribute("width"), 680);
 const DEFAULT_CANVAS_HEIGHT = getPositiveInteger(canvas?.getAttribute("height"), DEFAULT_CANVAS_WIDTH);
@@ -336,8 +319,11 @@ if (
 ) {
   throw new Error("Training config input(s) missing.");
 }
-if (!prismEl || !goalPdHudEl || !sessionTimerEl) {
+if (!scoreEl || !prismEl || !goalPdHudEl || !roundEl || !timerEl || !sessionTimerEl) {
   throw new Error("HUD element(s) missing.");
+}
+if (!statusEl || !startBtn || !resetBtn) {
+  throw new Error("Core control element(s) missing.");
 }
 if (!pauseCardEl || !pauseExerciseNameEl || !pauseVergenceModeEl || !pauseLrSplitEl) {
   throw new Error("Pause card element(s) missing.");
@@ -389,6 +375,10 @@ const state = {
   currentPd: 0,
   bestPd: 0,
   goalPd: DEFAULT_GOAL_PD,
+  // The goal the user asked for, capped only by the absolute max. Each mode's
+  // physiologic cap is applied to this when deriving goalPd, so switching to a
+  // low-cap mode and back restores the request instead of leaving it stuck low.
+  requestedGoalPd: DEFAULT_GOAL_PD,
   vergenceMode: DEFAULT_VERGENCE_MODE,
   fieldShape: DEFAULT_FIELD_SHAPE_VALUE,
   fieldSize: DEFAULT_FIELD_SIZE_VALUE,
@@ -527,6 +517,12 @@ historyImportBtn.addEventListener("click", () => historyImportFile.click());
 historyImportFile.addEventListener("change", onHistoryImportFileChosen);
 historyClearBtn.addEventListener("click", clearSessionHistoryWithConfirm);
 window.addEventListener("blur", pauseSessionForFocusLoss);
+window.addEventListener("beforeunload", event => {
+  if (!isTrainingActive()) return;
+  event.preventDefault();
+  // Chrome ignores preventDefault alone; returnValue must be set for the prompt.
+  event.returnValue = "";
+});
 document.addEventListener("visibilitychange", onVisibilityChange);
 document.addEventListener("fullscreenchange", onFullscreenChange);
 document.addEventListener("webkitfullscreenchange", onFullscreenChange);
@@ -563,13 +559,30 @@ function startSession() {
   syncSessionLayoutMode();
   hideSummaryCard();
 
+  // The setup-time goal cap assumes the fullscreen canvas. If fullscreen did
+  // not engage, re-check against what this smaller window can actually render
+  // so the target stays reachable.
+  let goalCapNote = "";
+  if (!isFullscreenActive()) {
+    const windowCapPd = Math.floor(difficultyToPd(getMaxRenderableDifficultySteps(), state.monitorWidthIn, state.viewDistanceIn));
+    if (windowCapPd >= 1 && state.goalPd > windowCapPd) {
+      state.goalPd = windowCapPd;
+      goalCapNote = " Session target lowered to fit this window; use fullscreen for the full range.";
+    }
+    state.difficultySteps = coreClampDifficultySteps(state.difficultySteps, getMaxDifficultySteps());
+    state.currentPd = difficultyToPd(state.difficultySteps, state.monitorWidthIn, state.viewDistanceIn);
+  }
+
   updateStatus(
-    `Session started: ${config.sessionMinutes} min, round ${config.roundSeconds}s, session target ${formatPd(config.goalPd)}Δ, mode ${formatVergenceLabel(config.vergenceMode)}, visual ${formatVisualPresetLabel(config.visualPreset)}. Estimated start ${formatPd(state.currentPd)}Δ.`
+    `Session started: ${config.sessionMinutes} min, round ${config.roundSeconds}s, session target ${formatPd(state.goalPd)}Δ, mode ${formatVergenceLabel(config.vergenceMode)}, visual ${formatVisualPresetLabel(config.visualPreset)}. Estimated start ${formatPd(state.currentPd)}Δ.${goalCapNote}`
   );
   startRound();
 }
 
 function resetSession() {
+  if (isTrainingActive() && !window.confirm("Reset now? The current session's progress will be discarded.")) {
+    return;
+  }
   const config = readConfigInputs();
   applyConfigInputs(config);
   persistConfig(config);
@@ -639,6 +652,13 @@ function onConfigChange(event) {
     state.monitorWidthNeedsReconfirm = false;
     state.confirmedDisplayContext = state.monitorWidthConfirmed ? getCurrentDisplayContext() : null;
   }
+  if (event?.target === goalPdInput) {
+    // Capture the user's intent bounded only by the absolute max, so a later
+    // mode with a lower cap does not permanently lower what they asked for.
+    state.requestedGoalPd = clampInt(
+      Number.parseInt(goalPdInput.value, 10), 1, ABSOLUTE_PD_MAX, state.requestedGoalPd
+    );
+  }
 
   const config = readConfigInputs();
   applyConfigInputs(config);
@@ -694,6 +714,12 @@ function endRunForDisplayContextChange() {
 function refreshViewport() {
   state.nowTs = performance.now();
   if (endRunForDisplayContextChange()) return;
+  // A viewport shrink lowers the render cap, so re-clamp a live round before
+  // the target can sit off-canvas. Only while running: pausing exits fullscreen
+  // to a smaller canvas, and clamping there would wrongly cut the demand.
+  if (state.running) {
+    state.difficultySteps = coreClampDifficultySteps(state.difficultySteps, getMaxDifficultySteps());
+  }
   state.dots = buildDotField(getCurrentDotCount(), getFieldExtent(), state.roundSeed || 1001, state.visualTuning);
   updateHud();
   renderScene();
@@ -724,10 +750,15 @@ function startRound() {
     // Facility phase advances only on correct answers, so a missed pair is
     // retried at the same fixed demand instead of drifting like the staircase.
     state.roundVergence = resolveRoundVergence("facility", state.facilityPhase + 1, state.modeSequenceSeed);
-    state.difficultySteps = pdToDifficultySteps(
-      getFacilityDemandPd(state.roundVergence),
-      state.monitorWidthIn,
-      state.viewDistanceIn
+    // The fixed pair also honors the render cap: on a small canvas or long
+    // view distance the base-out demand could otherwise push the target off-screen.
+    state.difficultySteps = coreClampDifficultySteps(
+      pdToDifficultySteps(
+        getFacilityDemandPd(state.roundVergence),
+        state.monitorWidthIn,
+        state.viewDistanceIn
+      ),
+      getMaxDifficultySteps()
     );
     state.currentPd = difficultyToPd(state.difficultySteps, state.monitorWidthIn, state.viewDistanceIn);
   }
@@ -953,7 +984,7 @@ function onKeyDown(event) {
     if (recoveryPair) {
       progressText = `Recovery at ${formatPd(recoveryPair.recoveryPd)}Δ (break ${formatPd(recoveryPair.breakPd)}Δ). ${progressText}`;
     }
-    if (state.bestPd >= state.goalPd) {
+    if (!isFacilityMode() && state.bestPd >= state.goalPd) {
       updateStatus(
         `Correct (${side}, ${formatExerciseLabel(correctScore.exerciseKey)}). Score +1. Session target reached at ${formatPd(state.bestPd)}Δ.`
       );
@@ -994,7 +1025,6 @@ function handlePauseToggleHotkey(event) {
   event.preventDefault();
   if (state.running) {
     pauseSessionByUser("Press Resume or P to continue.");
-    exitFullscreenIfActive();
   } else {
     resumeSessionWithFullscreen();
   }
@@ -1011,10 +1041,6 @@ function handleDebugDifficultyHotkeys(event) {
   event.preventDefault();
   applyDebugDifficultyAdjustment(direction, "key");
   return true;
-}
-
-function getDebugDifficultyDirection(event) {
-  return coreGetDebugDifficultyDirection(event);
 }
 
 function applyDebugDifficultyAdjustment(direction, source) {
@@ -1139,16 +1165,26 @@ function initializeConfigInputs() {
   }
 
   const persistedConfig = hydratePersistedConfigIntoInputs();
+  state.requestedGoalPd = getPersistedRequestedGoal(persistedConfig);
   state.monitorWidthNeedsReconfirm = shouldRequireMonitorWidthReconfirm(persistedConfig);
   state.monitorWidthConfirmed = !state.monitorWidthNeedsReconfirm && getPersistedMonitorWidthConfirmed(persistedConfig);
   state.confirmedDisplayContext = getPersistedDisplayContext(persistedConfig);
   const sanitizedConfig = readConfigInputs();
   applyConfigInputs(sanitizedConfig);
   persistConfig(sanitizedConfig);
+  makeTooltipLabelsFocusable();
   appendTooltipDefaults();
   updateVergenceModeDescription();
   syncMonitorWidthSetupUi();
   syncSessionLayoutMode();
+}
+
+// Tooltips also open on keyboard focus (see styles.css), but the labels need a
+// tabindex before Tab can reach them at all.
+function makeTooltipLabelsFocusable() {
+  for (const label of document.querySelectorAll(".setup-grid label.has-tooltip")) {
+    label.tabIndex = 0;
+  }
 }
 
 // Appends each setting's real default to its tooltip so a user who changes a
@@ -1182,7 +1218,6 @@ function readConfigInputs() {
   const redLensSide = normalizeRedLensSide(redLensSideInput.value);
   const visualPreset = normalizeVisualPreset(visualPresetInput.value);
   const startPdRaw = DEBUG_MODE ? Number.parseInt(startPdInput.value, 10) : DEFAULT_START_PD;
-  const goalPdRaw = Number.parseInt(goalPdInput.value, 10);
   const sessionMinutesRaw = Number.parseInt(sessionMinutesInput.value, 10);
   const roundSecondsRaw = Number.parseInt(roundSecondsInput.value, 10);
 
@@ -1196,7 +1231,9 @@ function readConfigInputs() {
   );
   const startPd = clampInt(startPdRaw, 0, ABSOLUTE_PD_MAX, DEFAULT_START_PD);
   const goalCapPd = Math.floor(getGoalPdCap(vergenceMode, viewDistanceIn, fieldSize, monitorWidthIn));
-  const goalPd = clampInt(goalPdRaw, 1, goalCapPd, Math.min(DEFAULT_GOAL_PD, goalCapPd));
+  // Derive the goal from the user's remembered request, capped to this mode, so
+  // returning from a low-cap mode restores it rather than leaving it stuck low.
+  const goalPd = clampInt(state.requestedGoalPd, 1, goalCapPd, Math.min(DEFAULT_GOAL_PD, goalCapPd));
   const sessionMinutes = clampInt(sessionMinutesRaw, 1, ABSOLUTE_SESSION_MINUTES_MAX, DEFAULT_SESSION_MINUTES);
   const roundSeconds = clampInt(roundSecondsRaw, MIN_ROUND_SECONDS, MAX_ROUND_SECONDS, DEFAULT_ROUND_SECONDS);
 
@@ -1309,6 +1346,7 @@ function persistConfig(config) {
     visualPreset: config.visualPreset,
     startPd: config.startPd,
     goalPd: config.goalPd,
+    requestedGoalPd: state.requestedGoalPd,
     sessionMinutes: config.sessionMinutes,
     roundSeconds: config.roundSeconds
   };
@@ -1359,6 +1397,14 @@ function getCurrentDisplayContext() {
   );
 }
 
+// Restore the remembered goal request. Falls back to a pre-requestedGoalPd
+// save's plain goalPd, then to the default, so older stored configs still load.
+function getPersistedRequestedGoal(persisted) {
+  const source = persisted && typeof persisted === "object" ? persisted : {};
+  const candidate = Number.isFinite(source.requestedGoalPd) ? source.requestedGoalPd : source.goalPd;
+  return clampInt(candidate, 1, ABSOLUTE_PD_MAX, DEFAULT_GOAL_PD);
+}
+
 function getPersistedDisplayContext(persisted) {
   if (!persisted || typeof persisted !== "object") return null;
   const rawContext = persisted.displayContext;
@@ -1406,7 +1452,7 @@ function isZoomOnlyContextChange() {
 
 function getMonitorWidthBlockedMessage() {
   if (!state.monitorWidthNeedsReconfirm) {
-    return "Set and confirm Monitor Width in Advanced Settings before starting. This is saved for future sessions.";
+    return "Set and confirm Monitor Width in Advanced Settings before starting, with browser zoom at 100%. This is saved for future sessions.";
   }
   if (isZoomOnlyContextChange()) {
     return "Browser zoom or display scaling changed since Monitor Width was confirmed. Reset zoom to 100%, then reconfirm Monitor Width in Advanced Settings.";
@@ -1448,7 +1494,7 @@ function syncMonitorWidthSetupUi() {
   if (needsWidth) {
     neededSteps.push(state.monitorWidthNeedsReconfirm
       ? "Reconfirm Monitor Width: the display changed since it was last confirmed."
-      : "Measure your monitor width side to side and confirm it below.");
+      : "Measure your monitor width side to side, set browser zoom to 100%, and confirm it below.");
   }
   if (needsLens) {
     neededSteps.push("Choose Red Lens Side: which eye is behind the red lens of your glasses.");
@@ -1562,7 +1608,9 @@ function applyConfigToState(config) {
   const startPdCapped = Math.min(config.startPd, getGoalPdCap(config.vergenceMode, config.viewDistanceIn, config.fieldSize, config.monitorWidthIn));
   state.difficultySteps = pdToDifficultySteps(startPdCapped, config.monitorWidthIn, config.viewDistanceIn);
   state.currentPd = difficultyToPd(state.difficultySteps, state.monitorWidthIn, state.viewDistanceIn);
-  state.bestPd = state.currentPd;
+  // Best PD only reflects demand actually fused, so it starts at zero even
+  // when a debug Start PD raises the opening demand.
+  state.bestPd = 0;
   state.sessionDurationMs = config.sessionMinutes * 60_000;
   state.roundDurationMs = config.roundSeconds * 1000;
   state.roundVergence = resolveRoundVergence(config.vergenceMode, 1, state.modeSequenceSeed);
@@ -1590,10 +1638,6 @@ function resetScoringState() {
 function recordCatchResponse(isFalseAlarm) {
   state.catchTotal += 1;
   if (isFalseAlarm) state.catchFalseAlarm += 1;
-}
-
-function normalizeExerciseKey(value) {
-  return coreNormalizeExerciseKey(value);
 }
 
 function recordScoringEvent(outcomeType, exerciseKey) {
@@ -1869,24 +1913,13 @@ function getGoalPdCap(mode, viewDistanceIn, fieldSize, monitorWidthIn) {
 
 function pauseSessionForInactivity() {
   if (!state.running) return;
-
-  state.resumeStartsNextRound = state.awaitingNextRound;
-  clearPendingNextRound();
-  state.running = false;
-  state.paused = true;
-  state.nowTs = performance.now();
-  state.pausedAtTs = state.nowTs;
-  stopRoundTicker();
-
-  setStartButtonLabel();
-  syncSessionLayoutMode();
   beep(720, 160); // mid pitch, longish: the auto-pause alert, meant to catch your ear when you have stepped away
-  updateStatus(`Auto-paused after ${formatInactivityDuration()} without input. Press Resume to continue.`, true);
-  updateHud();
-  renderScene();
+  pauseSessionByUser(`Auto-paused after ${formatInactivityDuration()} without input. Press Resume to continue.`, true);
 }
 
-function pauseSessionByUser(message) {
+// Pausing always leaves fullscreen: the fullscreen layout hides the pause card
+// and the Resume button, so staying in it would strand the user on a frozen field.
+function pauseSessionByUser(message, danger = false) {
   if (!state.running) return;
 
   state.resumeStartsNextRound = state.awaitingNextRound;
@@ -1899,7 +1932,8 @@ function pauseSessionByUser(message) {
 
   setStartButtonLabel();
   syncSessionLayoutMode();
-  updateStatus(message);
+  exitFullscreenIfActive();
+  updateStatus(message, danger);
   updateHud();
   renderScene();
 }
@@ -1981,22 +2015,6 @@ async function resumeSessionWithFullscreen() {
 function getPositiveInteger(value, fallback) {
   const parsed = Number.parseInt(value, 10);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
-}
-
-function clampInt(value, min, max, fallback) {
-  return coreClampInt(value, min, max, fallback);
-}
-
-function clampFloat(value, min, max, fallback) {
-  return coreClampFloat(value, min, max, fallback);
-}
-
-function sanitizePresetFloat(value, min, max, fallback) {
-  return coreSanitizePresetFloat(value, min, max, fallback);
-}
-
-function sanitizePresetInt(value, min, max, fallback) {
-  return coreSanitizePresetInt(value, min, max, fallback);
 }
 
 function formatInches(value) {
@@ -2144,22 +2162,22 @@ function normalizeVisualPresetConfig(preset) {
   const label = typeof preset?.label === "string" && preset.label.trim() ? preset.label : value;
   const source = preset?.tuning && typeof preset.tuning === "object" ? preset.tuning : {};
 
-  const targetSplitPx = sanitizePresetFloat(source.targetSplitPx, 2, 40, TARGET_SPLIT_PX);
-  const targetPopSizePx = sanitizePresetInt(source.targetPopSizePx, 0, 6, TARGET_POP_SIZE_PX);
-  const targetPopAlphaScale = sanitizePresetFloat(source.targetPopAlphaScale, 1, 1.35, TARGET_POP_ALPHA_SCALE);
-  const dotMediumThreshold = sanitizePresetFloat(source.dotMediumThreshold, 0, 1, DOT_MEDIUM_THRESHOLD);
+  const targetSplitPx = clampFloat(source.targetSplitPx, 2, 40, TARGET_SPLIT_PX);
+  const targetPopSizePx = clampInt(source.targetPopSizePx, 0, 6, TARGET_POP_SIZE_PX);
+  const targetPopAlphaScale = clampFloat(source.targetPopAlphaScale, 1, 1.35, TARGET_POP_ALPHA_SCALE);
+  const dotMediumThreshold = clampFloat(source.dotMediumThreshold, 0, 1, DOT_MEDIUM_THRESHOLD);
   const dotLargeThreshold = Math.max(
     dotMediumThreshold,
-    sanitizePresetFloat(source.dotLargeThreshold, 0, 1, DOT_LARGE_THRESHOLD)
+    clampFloat(source.dotLargeThreshold, 0, 1, DOT_LARGE_THRESHOLD)
   );
-  const dotSmallSizePx = sanitizePresetInt(source.dotSmallSizePx, 1, 6, DOT_SMALL_SIZE_PX);
+  const dotSmallSizePx = clampInt(source.dotSmallSizePx, 1, 6, DOT_SMALL_SIZE_PX);
   const dotMediumSizePx = Math.max(
     dotSmallSizePx,
-    sanitizePresetInt(source.dotMediumSizePx, 1, 6, DOT_MEDIUM_SIZE_PX)
+    clampInt(source.dotMediumSizePx, 1, 6, DOT_MEDIUM_SIZE_PX)
   );
   const dotLargeSizePx = Math.max(
     dotMediumSizePx,
-    sanitizePresetInt(source.dotLargeSizePx, 1, 8, DOT_LARGE_SIZE_PX)
+    clampInt(source.dotLargeSizePx, 1, 8, DOT_LARGE_SIZE_PX)
   );
 
   return Object.freeze({
@@ -2512,10 +2530,6 @@ function buildDotField(count, range, seed, visualTuning = FALLBACK_VISUAL_PRESET
   return dots;
 }
 
-function createRng(seed) {
-  return coreCreateRng(seed);
-}
-
 function updateHud() {
   state.currentPd = difficultyToPd(state.difficultySteps, state.monitorWidthIn, state.viewDistanceIn);
   scoreEl.textContent = formatScoreHudText();
@@ -2652,7 +2666,6 @@ function pauseSessionForFocusLoss() {
   if (!state.running) return;
   if (isFullscreenEntryTransient()) return;
   pauseSessionByUser("Session auto-paused after the app lost focus. Press Resume or P to continue.");
-  exitFullscreenIfActive();
 }
 
 // A focus-loss is the fullscreen entry's own transient blur when it lands in
@@ -3081,7 +3094,8 @@ function downloadTextFile(filename, mimeType, content) {
   document.body.append(link);
   link.click();
   link.remove();
-  URL.revokeObjectURL(url);
+  // Revoke on a later task: a synchronous revoke can cancel the just-started download in some engines.
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
 function exportSessionHistoryJson() {

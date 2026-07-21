@@ -12,7 +12,7 @@
         <h1 id="appTitle">Vergence Trainer</h1>
         <p class="intro-copy">
           Wear
-          <a href="https://en.wikipedia.org/wiki/Anaglyph_3D" target="_blank" rel="noopener noreferrer">red/blue anaglyph glasses</a>.
+          <a href="https://en.wikipedia.org/wiki/Anaglyph_3D" target="_blank" rel="noopener noreferrer">red/blue (cyan) anaglyph glasses</a>.
           Fuse the red/cyan dot fields and use the arrow keys to report where
           the floating target appears.
         </p>
@@ -97,7 +97,7 @@
             <label
               for="monitorWidth"
               class="monitor-width-label has-tooltip"
-              data-tip="Measure your screen side to side (not diagonally), in inches. Everything the app says in prism diopters is scaled from this, so it has to be right. If your measurement lands between marks, round up. Asked once, then saved in this browser."
+              data-tip="Measure your screen side to side (not diagonally), in inches. Everything the app says in prism diopters is scaled from this, so it has to be right. If your measurement lands between marks, round up. Set browser zoom to 100% (Cmd/Ctrl+0) before confirming; the app cannot detect zoom that was already applied. Asked once, then saved in this browser."
             >
               Monitor Width (in, set once)
             </label>
@@ -190,7 +190,7 @@
             >Vertical Mode Mapping</label>
             <select id="verticalPolarity">
               <option value="standard">Standard (Up = red up)</option>
-              <option value="flipped">Flipped (Up = blue up)</option>
+              <option value="flipped">Flipped (Up = blue (cyan) up)</option>
             </select>
             <label
               for="leftDotIntensity"
@@ -217,7 +217,7 @@
             >Eye Split (px)</label>
             <input id="lrSplit" type="text" value="0 px" readonly />
           </div>
-          <p class="advanced-hint">Hover any label for what it does.</p>
+          <p class="advanced-hint">Hover or Tab to any label for what it does.</p>
           <ul class="advanced-help-list debug-only">
             <li><strong>Debug Shortcuts:</strong> <kbd>[</kbd> or <kbd>-</kbd> / <kbd>_</kbd> for -1; <kbd>]</kbd> or <kbd>=</kbd> / <kbd>+</kbd> for +1. Works in fullscreen.</li>
           </ul>

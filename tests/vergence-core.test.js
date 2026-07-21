@@ -237,6 +237,7 @@ test("csv fields are quoted and formula-guarded without mangling numbers", () =>
 
 test("clamp helpers fall back on any non-finite input", () => {
   assert.equal(core.clampInt(5, 0, 10, 99), 5);
+  assert.equal(core.clampInt(2.5, 0, 10, 99), 2);
   assert.equal(core.clampInt(Number.NaN, 0, 10, 99), 99);
   assert.equal(core.clampInt(undefined, 0, 10, 99), 99);
   assert.equal(core.clampInt(Infinity, 0, 10, 99), 99);

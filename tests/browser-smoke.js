@@ -26,6 +26,7 @@ const MODE_SCENARIOS = [
     verifyTimeoutPauseResume: true,
     verifyResizeDuringPause: true,
     verifyRangeDescent: true,
+    verifyResetConfirm: true,
     suppressionDemandText: "Demand reduced"
   },
   {
@@ -292,8 +293,29 @@ function dispatchKey(targetWindow, code, key) {
 
 function installFullscreenStub(frameWindow) {
   const frameDocument = frameWindow.document;
-  const requestStub = () => Promise.resolve();
-  const exitStub = () => Promise.resolve();
+  // Track a fake fullscreenElement and fire fullscreenchange so the app's
+  // fullscreen layout and pause paths run for real during the suite.
+  let stubFullscreenElement = null;
+  const setStubFullscreen = element => {
+    stubFullscreenElement = element;
+    frameDocument.dispatchEvent(new (frameWindow.Event || Event)("fullscreenchange", { bubbles: true }));
+  };
+  try {
+    Object.defineProperty(frameDocument, "fullscreenElement", {
+      configurable: true,
+      get: () => stubFullscreenElement
+    });
+  } catch {
+    // The native property stays; fullscreen layout assertions may not hold.
+  }
+  const requestStub = () => {
+    setStubFullscreen(frameDocument.documentElement);
+    return Promise.resolve();
+  };
+  const exitStub = () => {
+    setStubFullscreen(null);
+    return Promise.resolve();
+  };
 
   try {
     Object.defineProperty(frameDocument.documentElement, "requestFullscreen", {
@@ -312,6 +334,12 @@ function installFullscreenStub(frameWindow) {
   } catch {
     frameDocument.exitFullscreen = exitStub;
   }
+}
+
+// Headless Chrome auto-dismisses dialogs (window.confirm returns false), which
+// would veto the reset confirmation mid-suite; accept dialogs by default.
+function installConfirmStub(frameWindow) {
+  frameWindow.confirm = () => true;
 }
 
 function getStorageKey(frameWindow) {
@@ -374,6 +402,7 @@ async function bootFreshApp() {
     return startBtn && vergenceModeInput && vergenceModeInput.options.length > 0;
   });
   installFullscreenStub(frameWindow);
+  installConfirmStub(frameWindow);
 
   return { frameWindow, frameDocument };
 }
@@ -459,14 +488,36 @@ async function verifyDebugHotkeys(frameWindow, frameDocument, debugStatusEl) {
 }
 
 async function verifyPauseResume(frameWindow, frameDocument, startBtn) {
+  // With the stubbed fullscreen engaged the run must use the fullscreen layout...
+  if (!frameDocument.body.classList.contains("session-active")) {
+    throw new Error("Fullscreen session layout missing while running");
+  }
   dispatchKey(frameWindow, "KeyP", "p");
+  // ...and pausing must release it, or the pause card would stay hidden.
   await waitFor("pause card", () => {
     const pauseCard = frameDocument.getElementById("pauseCard");
-    return !pauseCard.hidden && startBtn.textContent === "Resume";
+    return !pauseCard.hidden && startBtn.textContent === "Resume" &&
+      !frameDocument.body.classList.contains("session-active");
   });
 
   dispatchKey(frameWindow, "KeyP", "p");
   await waitFor("resume", () => startBtn.disabled === true && startBtn.textContent === "Running...");
+}
+
+// Declining the reset confirmation must leave the session running untouched.
+async function verifyResetDeclinedKeepsSession(frameWindow, frameDocument) {
+  const resetBtn = frameDocument.getElementById("resetBtn");
+  const startBtn = frameDocument.getElementById("startBtn");
+  frameWindow.confirm = () => false;
+  try {
+    resetBtn.click();
+    await delay(120);
+    if (startBtn.textContent !== "Running..." || startBtn.disabled !== true) {
+      throw new Error("Reset ran without confirmation and stopped the session");
+    }
+  } finally {
+    installConfirmStub(frameWindow);
+  }
 }
 
 async function stopScenarioSession(frameDocument) {
@@ -484,6 +535,9 @@ async function stopScenarioSession(frameDocument) {
 }
 
 async function verifyFocusLossPause(frameWindow, frameDocument, startBtn) {
+  // A blur right after a fullscreen (re-)entry lands in the entry grace window
+  // and is deliberately ignored; wait it out so this one counts as a real focus loss.
+  await delay(750);
   const EventCtor = frameWindow.Event || Event;
   frameWindow.dispatchEvent(new EventCtor("blur"));
   await waitFor("focus-loss pause", () => {
@@ -861,6 +915,7 @@ async function bootWithSeededHistory(records) {
     return startBtn && vergenceModeInput && vergenceModeInput.options.length > 0;
   });
   installFullscreenStub(frameWindow);
+  installConfirmStub(frameWindow);
   return { frameWindow, frameDocument };
 }
 
@@ -1038,6 +1093,53 @@ async function verifyHistoryImport() {
   }
 }
 
+// The session target follows the mode's physiologic cap in both directions:
+// visiting a low-cap mode lowers it, and returning to a permissive mode must
+// restore the user's original request rather than leaving it stuck low.
+async function verifyGoalRestoresAcrossModes() {
+  const { frameWindow, frameDocument } = await bootFreshApp();
+  try {
+    await setMonitorWidth(frameWindow, frameDocument, 24);
+    const goalInput = frameDocument.getElementById("goalPd");
+    const goalOf = () => Number(goalInput.value);
+    // Request more than any mode cap allows; the field lands at each mode's cap.
+    // Read the caps live rather than hardcoding them, since the renderable cap
+    // depends on the headless browser's screen size.
+    const requestGoal = value => {
+      goalInput.value = String(value);
+      dispatchFrameEvent(frameWindow, goalInput, "input");
+      dispatchFrameEvent(frameWindow, goalInput, "change");
+    };
+
+    await setSelectValue(frameWindow, frameDocument, "vergenceMode", "convergence", "vergenceMode");
+    requestGoal(500);
+    await delay(60);
+    const convGoal = goalOf();
+    if (!(convGoal > 8)) throw new Error(`Goal restore: convergence cap ${convGoal} not above the vertical cap`);
+
+    // Vergence Up caps low; the goal must drop below the convergence cap.
+    await setSelectValue(frameWindow, frameDocument, "vergenceMode", "vergence_up", "vergenceMode");
+    await waitFor("goal lowers in vertical", () => goalOf() < convGoal);
+    const vertGoal = goalOf();
+
+    // Returning to convergence must restore the full request, not stay low.
+    await setSelectValue(frameWindow, frameDocument, "vergenceMode", "convergence", "vergenceMode");
+    await waitFor("goal restores after leaving vertical", () => goalOf() === convGoal);
+
+    // Same round-trip through Divergence.
+    await setSelectValue(frameWindow, frameDocument, "vergenceMode", "divergence", "vergenceMode");
+    await waitFor("goal lowers in divergence", () => goalOf() < convGoal);
+    await setSelectValue(frameWindow, frameDocument, "vergenceMode", "convergence", "vergenceMode");
+    await waitFor("goal restores after leaving divergence", () => goalOf() === convGoal);
+
+    if (goalOf() <= vertGoal) {
+      throw new Error(`Goal restore: expected restore above ${vertGoal}, got ${goalOf()}`);
+    }
+  } finally {
+    clearFrameSessionHistory();
+  }
+}
+
 async function runModeScenario(scenario) {
   catchParamForBoot = scenario.catchParam || "0";
   const { frameWindow, frameDocument } = await bootFreshApp();
@@ -1156,6 +1258,11 @@ async function runModeScenario(scenario) {
     recordResult("pass", `${scenario.label}: resize during pause keeps the clock frozen`);
   }
 
+  if (scenario.verifyResetConfirm) {
+    await verifyResetDeclinedKeepsSession(frameWindow, frameDocument);
+    recordResult("pass", `${scenario.label}: declined reset keeps the session running`);
+  }
+
   await stopScenarioSession(frameDocument);
   recordResult("pass", `${scenario.label}: scenario reset`);
 }
@@ -1182,6 +1289,9 @@ async function runSmokeSuite() {
 
     await verifyHistoryImport();
     recordResult("pass", "History import merges and dedupes, rejects bad files");
+
+    await verifyGoalRestoresAcrossModes();
+    recordResult("pass", "Session target restores when leaving a low-cap mode");
 
     for (const scenario of MODE_SCENARIOS) {
       await runModeScenario(scenario);
