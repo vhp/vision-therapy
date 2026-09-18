@@ -33,14 +33,6 @@ work_dir="$(mktemp -d)"
 server_pid=""
 browser_pid=""
 
-# Refuse to run if something already answers on the port. Otherwise our own
-# server would fail to bind, exit, and the health check below would silently
-# pass against the foreign server, testing whatever content it happens to serve.
-if curl -fsS --max-time 5 -o /dev/null "http://localhost:${PORT}/" 2>/dev/null; then
-  echo "Port ${PORT} is already in use; set PORT to a free port and retry." >&2
-  exit 1
-fi
-
 cleanup() {
   if [ -n "$browser_pid" ]; then
     kill "$browser_pid" 2>/dev/null || true
@@ -59,6 +51,14 @@ trap cleanup EXIT
 # instead of leaving the server or browser running.
 trap 'exit 130' INT
 trap 'exit 143' TERM
+
+# Refuse to run if something already answers on the port. Otherwise our own
+# server would fail to bind, exit, and the health check below would silently
+# pass against the foreign server, testing whatever content it happens to serve.
+if curl -fsS --max-time 5 -o /dev/null "http://localhost:${PORT}/" 2>/dev/null; then
+  echo "Port ${PORT} is already in use; set PORT to a free port and retry." >&2
+  exit 1
+fi
 
 find_browser() {
   local candidates=(
@@ -92,7 +92,7 @@ fi
 
 # exec so $! is the server itself, not the wrapping subshell, and the trap's
 # kill reaches it directly.
-( cd "$repo_root" && exec "$PYTHON" -m http.server "$PORT" ) >"$work_dir/server.log" 2>&1 &
+( cd "$repo_root" && exec "$PYTHON" -m http.server --bind 127.0.0.1 "$PORT" ) >"$work_dir/server.log" 2>&1 &
 server_pid=$!
 
 health_url="http://localhost:${PORT}/tests/browser-smoke.html"
@@ -114,10 +114,15 @@ done
 
 dom="$work_dir/dom.html"
 : >"$dom"
+# Chrome cannot start its process sandbox as root (CI containers); nowhere else is dropping it justified.
+browser_flags=()
+if [ "$(id -u)" = "0" ]; then
+  browser_flags+=(--no-sandbox)
+fi
 "$browser" \
+  "${browser_flags[@]}" \
   --headless=new \
   --disable-gpu \
-  --no-sandbox \
   --virtual-time-budget=300000 \
   --user-data-dir="$work_dir/profile" \
   --dump-dom "${health_url}?autorun=1" >"$dom" 2>/dev/null &

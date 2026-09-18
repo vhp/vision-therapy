@@ -34,4 +34,4 @@ smoke:
 serve:
 	@echo "App:   http://localhost:$(PORT)/"
 	@echo "Smoke: http://localhost:$(PORT)/tests/browser-smoke.html"
-	$(PYTHON) -m http.server $(PORT)
+	$(PYTHON) -m http.server --bind 127.0.0.1 $(PORT)
