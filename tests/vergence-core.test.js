@@ -73,7 +73,8 @@ test("difficulty and PD conversions round trip", () => {
     monitorWidthIn,
     viewDistanceIn,
     screenWidthPx,
-    splitGainPxPerStep
+    splitGainPxPerStep,
+    baseTotalSplitPx
   );
   const recoveredPd = core.difficultyToPd(
     steps,
@@ -85,6 +86,12 @@ test("difficulty and PD conversions round trip", () => {
   );
 
   assert(Math.abs(recoveredPd - targetPd) < 1e-9);
+
+  // A nonzero base split is on-screen demand, so it must count at zero difficulty.
+  const basePd = core.splitPxToPd(baseTotalSplitPx, monitorWidthIn, viewDistanceIn, screenWidthPx);
+  assert(Math.abs(core.difficultyToPd(0, monitorWidthIn, viewDistanceIn, screenWidthPx, baseTotalSplitPx, splitGainPxPerStep) - basePd) < 1e-9);
+  assert.equal(core.difficultyToPd(0, monitorWidthIn, viewDistanceIn, screenWidthPx, 0, splitGainPxPerStep), 0);
+  assert.equal(core.pdToDifficultySteps(basePd / 2, monitorWidthIn, viewDistanceIn, screenWidthPx, splitGainPxPerStep, baseTotalSplitPx), 0);
 });
 
 test("pixel-to-prism-diopter conversion is anchored to an absolute value", () => {

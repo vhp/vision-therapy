@@ -73,8 +73,11 @@ Browser-based vergence training prototype using red/cyan anaglyph random-dot ste
   the baseline convergence to the screen (eye separation over viewing
   distance) plus a small margin beyond, about 21Δ at a 16-inch distance and
   less when sitting farther back. Vertical modes cap at `VERTICAL_PD_CAP`
-  (default 8Δ) since vertical fusional range is only a few diopters.
-  Convergence and the mixed jump modes keep the wide generic limit.
+  (default 8Δ) since vertical fusional range is only a few diopters. The jump
+  modes take the divergence cap too: they run one shared demand through both
+  directions, and every step up needs a divergence round cleared at that
+  demand, so anything above the divergence ceiling could never be reached.
+  Convergence keeps the wide generic limit.
 - If a session starts without fullscreen (for example the browser blocked the
   request), the session target is lowered at start to what that smaller window
   can render, and the status line says so.
@@ -102,7 +105,12 @@ Browser-based vergence training prototype using red/cyan anaglyph random-dot ste
 - Every completed session is appended to a local history
   (`localStorage`, last 200 sessions). The `Session History` panel below the
   app lists recent sessions and offers JSON/CSV export for sharing with a
-  doctor, plus a `Clear History` control.
+  doctor, plus a `Clear History` control. A session that ends before a single
+  round is answered (for example a display change right after Start) is not
+  recorded. Each record also carries the calibration behind its numbers
+  (monitor width, view distance, screen pixel width, device pixel ratio,
+  round seconds, and the catch-trial rate), so exports can be sanity-checked
+  and compared across devices.
 - `Import JSON` reads a file made by `Export JSON` and merges it into the
   stored history, keyed on each session's timestamp so re-importing or
   combining two devices never creates duplicates. This is the way to move your
@@ -192,6 +200,13 @@ When paused (for example after `Esc`):
 ## Notes
 
 - PD displayed here is an estimate based on monitor width, viewing distance, and pixel disparity.
+- PD is absolute, on the same scale as a prism bar: 0Δ means the red and cyan
+  fields sit exactly on top of each other, and every number counts the whole
+  on-screen split. `BASE_TOTAL_SPLIT_PX` in config.js (the split at zero
+  difficulty, in pixels) is 0 for that reason; set it higher and the app
+  reports that starting split as real demand rather than hiding it. Sessions
+  recorded before this change used an 8 px base that was not counted, so
+  their values read about 0.6Δ low on a 24-inch monitor at 16 inches.
 - The vergence work all lives in the background dot field: as demand rises,
   the red and cyan copies of the field slide further apart. The floating
   target square is different: its red and cyan copies stay a small fixed

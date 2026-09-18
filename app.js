@@ -32,9 +32,6 @@ const {
   recordRangeRecovery: coreRecordRangeRecovery,
   hasPendingRangeBreak: coreHasPendingRangeBreak,
   getBestRangePair: coreGetBestRangePair,
-  getMmPerPixel: coreGetMmPerPixel,
-  splitPxToPd: coreSplitPxToPd,
-  pdToSplitPx: corePdToSplitPx,
   difficultyToPd: coreDifficultyToPd,
   pdToDifficultySteps: corePdToDifficultySteps,
   pdDeltaToDifficultySteps: corePdDeltaToDifficultySteps,
@@ -445,8 +442,8 @@ let fullscreenEntryGraceUntil = 0;
 
 // Trend chart palette validated for CVD separation and contrast on #121212.
 const TREND_SERIES = Object.freeze([
-  { key: "bestPd", label: "Best PD", color: "#28a878" },
-  { key: "breakPd", label: "Break point", color: "#5b8ae6" }
+  { key: "bestPd", color: "#28a878" },
+  { key: "breakPd", color: "#5b8ae6" }
 ]);
 const TREND_MAX_SESSIONS = 60; // most recent sessions the progress chart plots; keeps the line readable instead of cramming in the full 200-session history
 const TREND_MARGIN = Object.freeze({ top: 8, right: 12, bottom: 20, left: 40 }); // padding in pixels around the chart's plot area (left is widest to fit the axis labels)
@@ -667,8 +664,7 @@ function onIntensityPreview() {
 function onConfigChange(event) {
   if (state.running || state.paused) return;
   if (event?.target === monitorWidthInput) {
-    const monitorWidthCandidate = Number.parseFloat(monitorWidthInput.value);
-    state.monitorWidthConfirmed = Number.isFinite(monitorWidthCandidate);
+    state.monitorWidthConfirmed = isMonitorWidthInRange(Number.parseFloat(monitorWidthInput.value));
     state.monitorWidthNeedsReconfirm = false;
     state.confirmedDisplayContext = state.monitorWidthConfirmed ? getCurrentDisplayContext() : null;
   }
@@ -698,14 +694,17 @@ function onConfigChange(event) {
 function confirmMonitorWidth() {
   if (state.running || state.paused) return;
 
-  const monitorWidthCandidate = Number.parseFloat(monitorWidthInput.value);
-  if (!Number.isFinite(monitorWidthCandidate)) {
-    updateStatus("Enter a valid Monitor Width before confirming it.", true);
+  if (!isMonitorWidthInRange(Number.parseFloat(monitorWidthInput.value))) {
+    updateStatus(getMonitorWidthBlockedMessage(), true);
     focusMonitorWidthInput();
     return;
   }
 
   onConfigChange({ target: monitorWidthInput });
+}
+
+function isMonitorWidthInRange(value) {
+  return Number.isFinite(value) && value >= MIN_MONITOR_WIDTH_IN && value <= MAX_MONITOR_WIDTH_IN;
 }
 
 function queueViewportRefresh() {
@@ -851,7 +850,7 @@ function handleRoundTimeout() {
     setRoundDebugState("catchTimeout", "-", "-", 0);
     beep(660, 120); // mid pitch, short: a neutral "nothing happened" tone for sitting out a catch trial
     updateStatus("No target that round. Nothing to report.");
-  } else if (isRangeEligibleMode() && coreHasPendingRangeBreak(state.vergenceRanges, state.roundVergence)) {
+  } else if (canDescendRange()) {
     // Running the clock out during the break-recovery descent is the same
     // "still can't fuse" as a Space press here, so step demand down score-free
     // rather than logging a penalized timeout mid-measurement.
@@ -943,7 +942,7 @@ function onKeyDown(event) {
     // After a break is recorded, further Space presses are the measurement
     // descent toward the recovery point, not performance failures: demand
     // steps down without touching the score or counters.
-    if (rangeEligible && coreHasPendingRangeBreak(state.vergenceRanges, state.roundVergence)) {
+    if (canDescendRange()) {
       const pdDelta = applyErrorDemandDrop();
       setRoundDebugState("rangeDescent", "space", state.targetSide, pdDelta);
       beep(500, 70); // low, quick blip: a demand step down during range measurement, deliberately softer than an error tone
@@ -1111,7 +1110,10 @@ function endSession() {
   const facility = isFacilityMode();
   const reachedGoal = !facility && state.bestPd >= state.goalPd;
   showSummaryCard(reachedGoal, elapsedMs);
-  const historySaved = appendSessionHistoryRecord(buildSessionHistoryRecord(reachedGoal, elapsedMs));
+  // Nothing answered means nothing to plot; saving it would put a 0Δ dip on the trend.
+  const historySaved = hasSessionActivity()
+    ? appendSessionHistoryRecord(buildSessionHistoryRecord(reachedGoal, elapsedMs))
+    : true;
   renderSessionHistory();
 
   const saveWarning = historySaved ? "" : " History could not be saved (browser storage is full or blocked).";
@@ -1379,7 +1381,8 @@ function persistConfig(config) {
 }
 
 function applyConfigInputs(config) {
-  if (state.monitorWidthConfirmed || monitorWidthInput.value !== "") {
+  // Unconfirmed input is left as typed so an out-of-range value stays visible beside its error.
+  if (state.monitorWidthConfirmed) {
     monitorWidthInput.value = formatInches(config.monitorWidthIn);
   }
   viewDistanceInput.value = formatInches(config.viewDistanceIn);
@@ -1471,6 +1474,10 @@ function isZoomOnlyContextChange() {
 }
 
 function getMonitorWidthBlockedMessage() {
+  const typed = Number.parseFloat(monitorWidthInput.value);
+  if (Number.isFinite(typed) && !isMonitorWidthInRange(typed)) {
+    return `Monitor Width must be between ${MIN_MONITOR_WIDTH_IN} and ${MAX_MONITOR_WIDTH_IN} inches, measured side to side.`;
+  }
   if (!state.monitorWidthNeedsReconfirm) {
     return "Set and confirm Monitor Width in Advanced Settings before starting, with browser zoom at 100%. This is saved for future sessions.";
   }
@@ -1637,6 +1644,11 @@ function applyConfigToState(config) {
   state.dots = buildDotField(INITIAL_DOT_COUNT, getFieldExtent(), state.roundSeed || 1001, state.visualTuning);
 }
 
+function hasSessionActivity() {
+  return state.correctCount + state.wrongCount + state.skipCount + state.timeoutCount +
+    state.suppressionCount + state.catchTotal > 0;
+}
+
 function resetScoringState() {
   state.score = 0;
   state.correctCount = 0;
@@ -1782,13 +1794,21 @@ function isRangeEligibleMode() {
     normalized === "smooth" || normalized === "vergence_up" || normalized === "vergence_down";
 }
 
+// The descent is only measurement while demand can still step down. At the
+// zero floor a miss is inattention, not a lower fusion point, so it scores.
+function canDescendRange() {
+  return isRangeEligibleMode() &&
+    coreHasPendingRangeBreak(state.vergenceRanges, state.roundVergence) &&
+    state.difficultySteps > 0;
+}
+
 // Physiologic ceiling for goals and demand, per mode. Pure divergence is
 // bounded by geometry (eyes can relax to parallel plus a small margin) and
-// vertical fusional range is a few diopters; convergence and the mixed jump
-// modes keep the wide generic limit.
+// vertical fusional range is a few diopters. Jump modes run one shared demand
+// through divergence rounds, so they take the divergence ceiling as well.
 function getModePdCap(mode, viewDistanceIn) {
   const normalized = normalizeVergenceMode(mode);
-  if (normalized === "divergence") {
+  if (normalized === "divergence" || normalized === "alternate" || normalized === "random_jump") {
     return Math.min(
       ABSOLUTE_PD_MAX,
       coreGetDivergenceCeilingPd(viewDistanceIn, NOMINAL_IPD_CM, DIVERGENCE_CEILING_MARGIN_PD)
@@ -2269,20 +2289,9 @@ function pdToDifficultySteps(targetPd, monitorWidthIn, viewDistanceIn) {
     monitorWidthIn,
     viewDistanceIn,
     getScreenWidthPx(),
-    SPLIT_GAIN_PX_PER_STEP
+    SPLIT_GAIN_PX_PER_STEP,
+    BASE_TOTAL_SPLIT_PX
   );
-}
-
-function splitPxToPd(splitPx, monitorWidthIn, viewDistanceIn) {
-  return coreSplitPxToPd(splitPx, monitorWidthIn, viewDistanceIn, getScreenWidthPx());
-}
-
-function pdToSplitPx(pd, monitorWidthIn, viewDistanceIn) {
-  return corePdToSplitPx(pd, monitorWidthIn, viewDistanceIn, getScreenWidthPx());
-}
-
-function getMmPerPixel(monitorWidthIn) {
-  return coreGetMmPerPixel(monitorWidthIn, getScreenWidthPx());
 }
 
 function getScreenWidthPx() {
@@ -2810,6 +2819,12 @@ function buildSessionHistoryRecord(reachedGoal, elapsedMs = state.sessionDuratio
     visualPreset: state.visualPreset,
     fieldSize: normalizeFieldSize(state.fieldSize),
     redLensSide: normalizeRedLensSide(state.redLensSide),
+    monitorWidthIn: state.monitorWidthIn,
+    viewDistanceIn: state.viewDistanceIn,
+    screenWidthPx: getScreenWidthPx(),
+    devicePixelRatio: window.devicePixelRatio || 1,
+    roundSeconds: state.roundDurationMs / 1000,
+    catchProbability: CATCH_PROBABILITY,
     sessionMinutes: state.sessionDurationMs / 60_000,
     elapsedMinutes: Math.round(elapsedMs / 6_000) / 10,
     goalPd: state.goalPd,
@@ -3152,7 +3167,9 @@ function exportSessionHistoryCsv() {
   if (history.length === 0) return;
 
   const header = [
-    "endedAt", "debug", "mode", "visualPreset", "fieldSize", "redLensSide", "sessionMinutes", "elapsedMinutes", "goalPd", "bestPd", "reachedGoal",
+    "endedAt", "debug", "mode", "visualPreset", "fieldSize", "redLensSide",
+    "monitorWidthIn", "viewDistanceIn", "screenWidthPx", "devicePixelRatio", "roundSeconds", "catchProbability",
+    "sessionMinutes", "elapsedMinutes", "goalPd", "bestPd", "reachedGoal",
     "totalScore", "rounds", "correct", "wrong", "timeouts", "skips", "suppressions",
     "catchTotal", "catchFalseAlarm", "catchTimeout", "bestBreakPd", "bestRecoveryPd", "facilityCycles", "facilityCpm"
   ];
@@ -3166,6 +3183,12 @@ function exportSessionHistoryCsv() {
       record.visualPreset ?? "",
       record.fieldSize ?? "",
       record.redLensSide ?? "",
+      record.monitorWidthIn ?? "",
+      record.viewDistanceIn ?? "",
+      record.screenWidthPx ?? "",
+      record.devicePixelRatio ?? "",
+      record.roundSeconds ?? "",
+      record.catchProbability ?? "",
       record.sessionMinutes ?? "",
       record.elapsedMinutes ?? "",
       record.goalPd ?? "",

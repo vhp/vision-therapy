@@ -35,7 +35,7 @@ window.APP_CONFIG = Object.freeze({
   MIN_VIEW_DISTANCE_IN: 8,          // closest view distance the setup field accepts, in inches
   MAX_VIEW_DISTANCE_IN: 60,         // farthest view distance the setup field accepts, in inches
 
-  BASE_TOTAL_SPLIT_PX: 8,           // how far apart the two eye images sit at zero demand, in screen pixels; keeps the field readable before demand builds
+  BASE_TOTAL_SPLIT_PX: 0,           // how far apart the two eye images sit at zero difficulty, in screen pixels; 0 means they coincide, the same zero a prism bar uses, and any other value is a real starting demand reported as such
   SPLIT_GAIN_PX_PER_STEP: 7,        // extra pixels of separation added per difficulty step; this is what turns one step of demand into on-screen disparity
   TARGET_SPLIT_PX: 12,              // fixed disparity of the floating target square, in pixels; it never changes, so the square stays equally findable at any demand
 

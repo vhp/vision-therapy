@@ -149,9 +149,9 @@
     baseTotalSplitPx,
     splitGainPxPerStep
   ) {
+    // Absolute like a prism bar: a nonzero base split is real starting demand, so it counts.
     const totalSplitPx = getTotalSplitPx(difficultySteps, baseTotalSplitPx, splitGainPxPerStep);
-    const relativeSplitPx = Math.max(0, totalSplitPx - baseTotalSplitPx);
-    return splitPxToPd(relativeSplitPx, monitorWidthIn, viewDistanceIn, screenWidthPx);
+    return splitPxToPd(totalSplitPx, monitorWidthIn, viewDistanceIn, screenWidthPx);
   }
 
   function pdToDifficultySteps(
@@ -159,10 +159,11 @@
     monitorWidthIn,
     viewDistanceIn,
     screenWidthPx,
-    splitGainPxPerStep
+    splitGainPxPerStep,
+    baseTotalSplitPx = 0
   ) {
-    const relativeSplitPx = Math.max(0, pdToSplitPx(targetPd, monitorWidthIn, viewDistanceIn, screenWidthPx));
-    return relativeSplitPx / splitGainPxPerStep;
+    const splitPx = pdToSplitPx(targetPd, monitorWidthIn, viewDistanceIn, screenWidthPx);
+    return Math.max(0, (splitPx - baseTotalSplitPx) / splitGainPxPerStep);
   }
 
   function normalizeExerciseKey(value) {

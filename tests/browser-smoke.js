@@ -27,6 +27,7 @@ const MODE_SCENARIOS = [
     verifyResizeDuringPause: true,
     verifyRangeDescent: true,
     verifyResetConfirm: true,
+    verifyPdConversion: true,
     suppressionDemandText: "Demand reduced"
   },
   {
@@ -60,10 +61,12 @@ const MODE_SCENARIOS = [
     verifyScoringAndCompletion: true
   },
   {
-    label: "Divergence / Circle",
+    label: "Divergence / Circle / Red Right",
     vergenceMode: "divergence",
     fieldShape: "circle",
     verticalPolarity: "standard",
+    // Covers the red-right sign path; every other scenario runs red-left.
+    redLensSide: "right",
     expectedInitialExercises: ["Divergence"],
     expectedNextExercises: ["Divergence"],
     expectedAxis: "H",
@@ -78,7 +81,9 @@ const MODE_SCENARIOS = [
     verticalPolarity: "standard",
     expectedInitialExercises: ["Convergence"],
     expectedNextExercises: ["Divergence"],
-    expectedAxis: "H"
+    expectedAxis: "H",
+    // Jump modes share the divergence demand path, so they inherit its ceiling.
+    expectedGoalText: "session target 21.0Δ"
   },
   {
     label: "Jump Vergence (Random)",
@@ -693,12 +698,51 @@ async function verifyResizeDuringPause(frameWindow, frameDocument, startBtn) {
   }
 }
 
-async function verifySmoothRamp(frameDocument) {
+async function verifySmoothRamp(frameWindow, frameDocument, debugStatusEl) {
   const prismEl = frameDocument.getElementById("prism");
+  const statusEl = frameDocument.getElementById("status");
   const readPd = () => Number.parseFloat(String(prismEl.textContent || "").replace(/[^\d.]/g, ""));
   const before = readPd();
   // With no answers at all, the demand must climb on its own from the ramp.
   await waitFor("smooth demand ramps up", () => readPd() > before + 0.3, 5000);
+
+  // Raise demand above the drop first so the zero floor cannot cut the fall short.
+  const dropPd = Number(frameWindow.APP_CONFIG.SMOOTH_BREAK_DROP_PD);
+  let guard = 0;
+  while (readPd() < dropPd + 2 && guard < 80) {
+    dispatchKey(frameWindow, "BracketRight", "]");
+    guard += 1;
+  }
+  const pdBeforeBreak = readPd();
+  if (pdBeforeBreak < dropPd + 2) {
+    throw new Error(`Smooth break: could not raise demand above ${dropPd + 2}Δ, stuck at ${pdBeforeBreak}Δ`);
+  }
+  dispatchKey(frameWindow, "Space", " ");
+  await waitFor("smooth break drops demand", () =>
+    String(statusEl.textContent || "").includes("Break recorded") &&
+    readPd() <= pdBeforeBreak - dropPd + 0.2);
+
+  await waitFor("smooth target after break", () => {
+    const d = parseDebugStatus(debugStatusEl.textContent);
+    return d.event === "pending" && Boolean(getTargetArrow(d.target));
+  });
+  const arrow = getTargetArrow(parseDebugStatus(debugStatusEl.textContent).target);
+  dispatchKey(frameWindow, arrow.code, arrow.key);
+  await waitFor("smooth recovery recorded", () => String(statusEl.textContent || "").includes("Recovery at"));
+}
+
+// Recomputes PD from the pixel readout so a wrong denominator (e.g. DPR-scaled px) fails here.
+function verifyDisplayedPdMatchesSplit(frameWindow, frameDocument, monitorWidthIn) {
+  const splitPx = Number.parseFloat(String(frameDocument.getElementById("lrSplit").value || ""));
+  const shownPd = Number.parseFloat(String(frameDocument.getElementById("prism").textContent || "").replace(/[^\d.]/g, ""));
+  const viewDistanceIn = Number(frameDocument.getElementById("viewDistance").value);
+  const mmPerPx = (monitorWidthIn * 25.4) / frameWindow.screen.width;
+  const expectedPd = ((splitPx * mmPerPx) / 10) / (viewDistanceIn * 0.0254);
+  // The split readout is rounded to whole pixels and the PD to one decimal.
+  const tolerance = (0.5 * mmPerPx) / 10 / (viewDistanceIn * 0.0254) + 0.051;
+  if (!(Math.abs(shownPd - expectedPd) <= tolerance)) {
+    throw new Error(`Displayed PD ${shownPd}Δ does not match ${splitPx}px split (expected ${expectedPd.toFixed(3)}Δ)`);
+  }
 }
 
 async function verifyCatchTrials(frameWindow, frameDocument, debugStatusEl) {
@@ -1150,7 +1194,7 @@ async function runModeScenario(scenario) {
   await setMonitorWidth(frameWindow, frameDocument, 24);
   recordResult("pass", `${scenario.label}: monitor width confirmed`);
 
-  await setSelectValue(frameWindow, frameDocument, "redLensSide", "left", "redLensSide");
+  await setSelectValue(frameWindow, frameDocument, "redLensSide", scenario.redLensSide || "left", "redLensSide");
   recordResult("pass", `${scenario.label}: red lens side chosen`);
 
   await setSelectValue(frameWindow, frameDocument, "vergenceMode", scenario.vergenceMode, "vergenceMode");
@@ -1182,8 +1226,13 @@ async function runModeScenario(scenario) {
   recordResult("pass", `${scenario.label}: initial exercise and axis verified`);
 
   if (scenario.verifySmoothRamp) {
-    await verifySmoothRamp(frameDocument);
-    recordResult("pass", `${scenario.label}: demand ramps continuously`);
+    await verifySmoothRamp(frameWindow, frameDocument, debugStatusEl);
+    recordResult("pass", `${scenario.label}: demand ramps, Space drops it, recovery closes the pair`);
+  }
+
+  if (scenario.verifyPdConversion) {
+    verifyDisplayedPdMatchesSplit(frameWindow, frameDocument, 24);
+    recordResult("pass", `${scenario.label}: displayed PD matches the pixel split`);
   }
 
   if (scenario.verifyDebugHotkeys) {
