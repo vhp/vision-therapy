@@ -220,7 +220,9 @@
   // strings that begin with =, +, -, @ (skipping plain numbers so real
   // negatives survive).
   function csvEscapeField(value) {
-    let text = value === null || value === undefined ? "" : String(value);
+    // Records can come from an imported file, and String() on an object field can throw.
+    const isScalar = typeof value === "number" || typeof value === "string" || typeof value === "boolean";
+    let text = isScalar ? String(value) : "";
     const isPlainNumber = /^-?\d+(?:\.\d+)?$/.test(text);
     if (!isPlainNumber && /^[=+\-@\t\r]/.test(text)) {
       text = `'${text}`;

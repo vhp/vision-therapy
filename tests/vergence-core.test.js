@@ -240,6 +240,9 @@ test("csv fields are quoted and formula-guarded without mangling numbers", () =>
   assert.equal(core.csvEscapeField("+cmd"), "'+cmd");
   assert.equal(core.csvEscapeField("@formula"), "'@formula");
   assert.equal(core.csvEscapeField("=1+2,3"), '"\'=1+2,3"');
+  assert.equal(core.csvEscapeField(true), "true");
+  assert.equal(core.csvEscapeField({ toString: 1 }), "");
+  assert.equal(core.csvEscapeField(["=1"]), "");
 });
 
 test("clamp helpers fall back on any non-finite input", () => {

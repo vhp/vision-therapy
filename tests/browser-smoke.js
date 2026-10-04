@@ -555,6 +555,43 @@ async function verifyFocusLossPause(frameWindow, frameDocument, startBtn) {
   await waitFor("focus-loss resume", () => startBtn.disabled === true && startBtn.textContent === "Running...");
 }
 
+// Must run right after a P resume, so the hide lands inside the fullscreen entry grace window.
+async function verifyHiddenInEntryGracePauses(frameWindow, frameDocument, startBtn) {
+  Object.defineProperty(frameDocument, "visibilityState", { configurable: true, get: () => "hidden" });
+  try {
+    frameDocument.dispatchEvent(new (frameWindow.Event || Event)("visibilitychange"));
+    await waitFor("hidden page pauses inside the entry grace", () => {
+      const statusText = String(frameDocument.getElementById("status")?.textContent || "");
+      return startBtn.textContent === "Resume" && statusText.includes("lost focus");
+    });
+  } finally {
+    delete frameDocument.visibilityState;
+  }
+
+  dispatchKey(frameWindow, "KeyP", "p");
+  await waitFor("resume after hidden pause", () => startBtn.disabled === true && startBtn.textContent === "Running...");
+}
+
+// Click before P: with the stub, P's resume settles first, the ordering that can restart the session.
+async function verifyResumeRaceKeepsSession(frameWindow, frameDocument, startBtn) {
+  const roundEl = frameDocument.getElementById("round");
+  const roundBefore = Number(roundEl.textContent);
+  if (!(roundBefore > 1)) {
+    throw new Error(`Resume race: needs a session past round 1 to detect a restart, at round ${roundBefore}`);
+  }
+  dispatchKey(frameWindow, "KeyP", "p");
+  await waitFor("pause before resume race", () => startBtn.textContent === "Resume");
+
+  startBtn.click();
+  dispatchKey(frameWindow, "KeyP", "p");
+  await waitFor("resume after race", () => startBtn.textContent === "Running...");
+  await delay(120);
+  const roundAfter = Number(roundEl.textContent);
+  if (roundAfter < roundBefore) {
+    throw new Error(`Resume race restarted the session: round ${roundBefore} -> ${roundAfter}`);
+  }
+}
+
 async function verifyTimeoutGuard(frameWindow, frameDocument, debugStatusEl) {
   const timedRound = Number(frameDocument.getElementById("round").textContent);
   await waitFor("timeout transition", () => {
@@ -733,7 +770,25 @@ async function verifySmoothRamp(frameWindow, frameDocument, debugStatusEl) {
 
 // Recomputes PD from the pixel readout so a wrong denominator (e.g. DPR-scaled px) fails here.
 function verifyDisplayedPdMatchesSplit(frameWindow, frameDocument, monitorWidthIn) {
-  const splitPx = Number.parseFloat(String(frameDocument.getElementById("lrSplit").value || ""));
+  // Sessions start at 0 px, where any mm-per-pixel formula yields 0; raise demand so the check bites.
+  const raiseSteps = 3;
+  for (let i = 0; i < raiseSteps; i += 1) {
+    dispatchKey(frameWindow, "BracketRight", "]");
+  }
+  try {
+    const splitPx = Number.parseFloat(String(frameDocument.getElementById("lrSplit").value || ""));
+    if (!(splitPx > 0)) {
+      throw new Error(`PD conversion: expected a nonzero split after raising demand, got ${splitPx}px`);
+    }
+    assertDisplayedPdMatchesSplit(frameWindow, frameDocument, monitorWidthIn, splitPx);
+  } finally {
+    for (let i = 0; i < raiseSteps; i += 1) {
+      dispatchKey(frameWindow, "BracketLeft", "[");
+    }
+  }
+}
+
+function assertDisplayedPdMatchesSplit(frameWindow, frameDocument, monitorWidthIn, splitPx) {
   const shownPd = Number.parseFloat(String(frameDocument.getElementById("prism").textContent || "").replace(/[^\d.]/g, ""));
   const viewDistanceIn = Number(frameDocument.getElementById("viewDistance").value);
   const mmPerPx = (monitorWidthIn * 25.4) / frameWindow.screen.width;
@@ -837,11 +892,15 @@ async function verifyScoringAndCompletion(frameWindow, frameDocument, debugStatu
   const prismEl = frameDocument.getElementById("prism");
   const readPd = () => Number.parseFloat(String(prismEl.textContent || "").replace(/[^\d.]/g, ""));
 
-  // Three correct answers in a row must raise demand once (the step-up).
+  // Checking the hold after answers 1 and 2 is what tells 3-down/1-up apart from a 1-up or 2-up rule.
   const pdBeforeStreak = readPd();
-  for (let i = 0; i < 3; i += 1) {
+  for (let i = 1; i <= 2; i += 1) {
     await answerCurrentRoundCorrectly(frameWindow, frameDocument, debugStatusEl);
+    if (readPd() !== pdBeforeStreak) {
+      throw new Error(`Staircase: PD moved after ${i} correct (${pdBeforeStreak} -> ${readPd()})`);
+    }
   }
+  await answerCurrentRoundCorrectly(frameWindow, frameDocument, debugStatusEl);
   const pdAfterStreak = readPd();
   if (!(pdAfterStreak > pdBeforeStreak)) {
     throw new Error(`Staircase step-up failed: PD did not rise after 3 correct (${pdBeforeStreak} -> ${pdAfterStreak})`);
@@ -1132,7 +1191,76 @@ async function verifyHistoryImport() {
     if (tableBody.children.length !== 2) {
       throw new Error(`Invalid import changed the history: ${tableBody.children.length} rows`);
     }
+
+    // Once the store is full, sessions older than everything kept are trimmed and must not count as imported.
+    const newer = Array.from({ length: 200 }, (_, i) => ({
+      endedAt: new Date(2_000_000 + i * 1000).toISOString(), mode: "convergence", bestPd: 5, totalScore: 1, rounds: 3, suppressions: 0, ranges: []
+    }));
+    await importFileIntoInput(frameWindow, fileInput, JSON.stringify(newer));
+    await waitFor("full import", () => String(statusEl.textContent || "").includes("Imported 200 new"));
+    const older = [100, 200, 300].map(ms => ({
+      endedAt: new Date(ms).toISOString(), mode: "convergence", bestPd: 5, totalScore: 1, rounds: 3, suppressions: 0, ranges: []
+    }));
+    await importFileIntoInput(frameWindow, fileInput, JSON.stringify(older));
+    await waitFor("trimmed import is reported", () => {
+      const text = String(statusEl.textContent || "");
+      return text.includes("Imported 0 new") && text.includes("3 older sessions did not fit");
+    });
   } finally {
+    clearFrameSessionHistory();
+  }
+}
+
+// The object field stands in for a hand-edited import: String() on it throws, which must not break rendering or export.
+async function verifyHistoryExport() {
+  const seeded = [
+    { endedAt: new Date(600000).toISOString(), mode: "convergence", bestPd: 10, totalScore: 4, rounds: 10, suppressions: 0, ranges: [] },
+    { endedAt: new Date(1200000).toISOString(), mode: "=HYPERLINK(\"x\")", bestPd: 12, totalScore: { toString: 1 }, rounds: 11, suppressions: 0, ranges: [] }
+  ];
+  const { frameWindow, frameDocument } = await bootWithSeededHistory(seeded);
+  const frameUrl = frameWindow.URL;
+  const originalCreate = frameUrl.createObjectURL;
+  const originalRevoke = frameUrl.revokeObjectURL;
+  const anchorProto = frameWindow.HTMLAnchorElement.prototype;
+  const blobs = [];
+  frameUrl.createObjectURL = blob => {
+    blobs.push(blob);
+    return "blob:smoke-export";
+  };
+  frameUrl.revokeObjectURL = () => {};
+  Object.defineProperty(anchorProto, "click", { configurable: true, writable: true, value() {} });
+  try {
+    const rowCount = frameDocument.getElementById("historyTableBody").children.length;
+    if (rowCount !== 2) {
+      throw new Error(`History export: expected 2 rendered rows, got ${rowCount}`);
+    }
+    if (String(frameDocument.getElementById("status")?.textContent || "").trim() === "") {
+      throw new Error("History export: startup did not complete after rendering an object field");
+    }
+
+    frameDocument.getElementById("historyExportCsvBtn").click();
+    frameDocument.getElementById("historyExportJsonBtn").click();
+    if (blobs.length !== 2) {
+      throw new Error(`History export: expected 2 downloads, got ${blobs.length}`);
+    }
+
+    const csv = await blobs[0].text();
+    const lines = csv.split("\n");
+    if (!lines[0].startsWith("endedAt,debug,mode,") || lines.length !== 3) {
+      throw new Error(`History export: unexpected CSV shape (${lines.length} lines, header "${lines[0]}")`);
+    }
+    if (!csv.includes("\"'=HYPERLINK(\"\"x\"\")\"")) {
+      throw new Error("History export: CSV lost the formula-injection guard");
+    }
+
+    const json = JSON.parse(await blobs[1].text());
+    if (!Array.isArray(json) || json.length !== 2) {
+      throw new Error("History export: JSON did not round-trip both sessions");
+    }
+  } finally {
+    frameUrl.createObjectURL = originalCreate;
+    frameUrl.revokeObjectURL = originalRevoke;
+    delete anchorProto.click;
     clearFrameSessionHistory();
   }
 }
@@ -1295,11 +1423,15 @@ async function runModeScenario(scenario) {
   if (scenario.verifyPauseResume) {
     await verifyPauseResume(frameWindow, frameDocument, startBtn);
     recordResult("pass", `${scenario.label}: pause/resume verified`);
+    await verifyResumeRaceKeepsSession(frameWindow, frameDocument, startBtn);
+    recordResult("pass", `${scenario.label}: Resume click plus P resumes once without restarting`);
   }
 
   if (scenario.verifyFocusLossPause) {
     await verifyFocusLossPause(frameWindow, frameDocument, startBtn);
     recordResult("pass", `${scenario.label}: focus-loss auto-pause verified`);
+    await verifyHiddenInEntryGracePauses(frameWindow, frameDocument, startBtn);
+    recordResult("pass", `${scenario.label}: hidden page pauses even inside the fullscreen entry grace`);
   }
 
   if (scenario.verifyResizeDuringPause) {
@@ -1338,6 +1470,9 @@ async function runSmokeSuite() {
 
     await verifyHistoryImport();
     recordResult("pass", "History import merges and dedupes, rejects bad files");
+
+    await verifyHistoryExport();
+    recordResult("pass", "History exports CSV and JSON, survives odd fields, keeps the formula guard");
 
     await verifyGoalRestoresAcrossModes();
     recordResult("pass", "Session target restores when leaving a low-cap mode");

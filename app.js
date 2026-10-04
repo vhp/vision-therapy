@@ -467,12 +467,15 @@ startBtn.addEventListener("click", async () => {
       return;
     }
     ensureAudioContext();
+    // P or Reset can change state during the await; a fresh start would wipe a live session.
+    const wasPaused = state.paused;
     await requestFullscreenOnStart();
-    if (state.paused) {
+    if (wasPaused) {
       resumeSession();
-      return;
+    } else {
+      startSession();
     }
-    startSession();
+    pauseIfHiddenAfterFullscreenAwait();
   } finally {
     startInFlight = false;
   }
@@ -2051,9 +2054,15 @@ function resumeSession() {
 }
 
 async function resumeSessionWithFullscreen() {
-  if (!state.paused) return;
-  await requestFullscreenOnStart();
-  resumeSession();
+  if (startInFlight || !state.paused) return;
+  startInFlight = true;
+  try {
+    await requestFullscreenOnStart();
+    resumeSession();
+    pauseIfHiddenAfterFullscreenAwait();
+  } finally {
+    startInFlight = false;
+  }
 }
 
 function getPositiveInteger(value, fallback) {
@@ -2714,22 +2723,29 @@ function onFullscreenChange() {
   queueViewportRefresh();
 }
 
+const FOCUS_LOSS_PAUSE_MESSAGE = "Session auto-paused after the app lost focus. Press Resume or P to continue.";
+
 function pauseSessionForFocusLoss() {
   if (!state.running) return;
   if (isFullscreenEntryTransient()) return;
-  pauseSessionByUser("Session auto-paused after the app lost focus. Press Resume or P to continue.");
+  pauseSessionByUser(FOCUS_LOSS_PAUSE_MESSAGE);
 }
 
-// A focus-loss is the fullscreen entry's own transient blur when it lands in
-// the grace window and fullscreen is genuinely active. That combination never
-// happens on a real tab-switch away, so those still pause.
 function isFullscreenEntryTransient() {
   return performance.now() < fullscreenEntryGraceUntil && isFullscreenActive();
 }
 
+// Skips the entry grace: that covers Firefox's blur, and a hidden page is always a real switch away.
 function onVisibilityChange() {
   if (document.visibilityState !== "hidden") return;
-  pauseSessionForFocusLoss();
+  pauseSessionByUser(FOCUS_LOSS_PAUSE_MESSAGE);
+}
+
+// A hide during the fullscreen await landed before the session was running, so nothing paused it.
+function pauseIfHiddenAfterFullscreenAwait() {
+  if (document.visibilityState === "hidden") {
+    pauseSessionByUser(FOCUS_LOSS_PAUSE_MESSAGE);
+  }
 }
 
 function syncSessionLayoutMode() {
@@ -2911,7 +2927,14 @@ function formatHistoryModeLabel(mode) {
   return typeof mode === "string" && mode.trim() ? mode.trim() : "-";
 }
 
+// String() on an object field from an imported file can throw, which would abort every later render.
+function formatRecordScalar(value, fallback) {
+  const type = typeof value;
+  return type === "number" || type === "string" || type === "boolean" ? String(value) : fallback;
+}
+
 function formatHistoryDate(isoText) {
+  if (typeof isoText !== "string") return "-";
   const date = new Date(isoText);
   if (Number.isNaN(date.getTime())) return "-";
   return date.toLocaleString(undefined, {
@@ -2920,6 +2943,7 @@ function formatHistoryDate(isoText) {
 }
 
 function formatHistoryDateShort(isoText) {
+  if (typeof isoText !== "string") return "-";
   const date = new Date(isoText);
   if (Number.isNaN(date.getTime())) return "-";
   return date.toLocaleDateString(undefined, { year: "2-digit", month: "2-digit", day: "2-digit" });
@@ -2944,9 +2968,9 @@ function renderSessionHistory() {
       record.debug === true ? `${formatHistoryModeLabel(record.mode)} (debug)` : formatHistoryModeLabel(record.mode),
       sanitizeRecordPd(record.bestPd) !== null ? `${formatPd(sanitizeRecordPd(record.bestPd))}Δ` : "-",
       bestRange ? `${formatPd(bestRange.breakPd)}/${formatPd(bestRange.recoveryPd)}Δ` : "-",
-      String(record.totalScore ?? "-"),
-      String(record.rounds ?? "-"),
-      String(record.suppressions ?? 0)
+      formatRecordScalar(record.totalScore, "-"),
+      formatRecordScalar(record.rounds, "-"),
+      formatRecordScalar(record.suppressions, "0")
     ];
     for (const text of cells) {
       const cell = document.createElement("td");
@@ -3246,17 +3270,20 @@ function importSessionHistoryFromFile(file) {
     for (const record of readSessionHistory()) {
       if (typeof record.endedAt === "string") byEndedAt.set(record.endedAt, record);
     }
-    let added = 0;
+    const newRecords = [];
     for (const record of incoming) {
       if (!byEndedAt.has(record.endedAt)) {
         byEndedAt.set(record.endedAt, record);
-        added += 1;
+        newRecords.push(record);
       }
     }
 
     const merged = [...byEndedAt.values()]
       .sort((a, b) => String(a.endedAt).localeCompare(String(b.endedAt)))
       .slice(-Math.max(1, HISTORY_MAX_ENTRIES));
+    const keptRecords = new Set(merged);
+    const added = newRecords.filter(record => keptRecords.has(record)).length;
+    const droppedForAge = newRecords.length - added;
 
     let saved = false;
     try {
@@ -3274,7 +3301,13 @@ function importSessionHistoryFromFile(file) {
 
     renderSessionHistory();
     const skippedText = skipped > 0 ? ` Skipped ${skipped} entr${skipped === 1 ? "y" : "ies"} without a valid session shape.` : "";
-    updateStatus(`Imported ${added} new session${added === 1 ? "" : "s"} from ${incoming.length} in the file.${skippedText}`, added === 0 && incoming.length === 0);
+    const droppedText = droppedForAge > 0
+      ? ` ${droppedForAge} older session${droppedForAge === 1 ? "" : "s"} did not fit the ${HISTORY_MAX_ENTRIES}-session limit and ${droppedForAge === 1 ? "was" : "were"} not kept.`
+      : "";
+    updateStatus(
+      `Imported ${added} new session${added === 1 ? "" : "s"} from ${incoming.length} in the file.${droppedText}${skippedText}`,
+      added === 0 && (incoming.length === 0 || droppedForAge > 0)
+    );
   };
   reader.readAsText(file);
 }
