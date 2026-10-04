@@ -55,7 +55,7 @@ trap 'exit 143' TERM
 # Refuse to run if something already answers on the port. Otherwise our own
 # server would fail to bind, exit, and the health check below would silently
 # pass against the foreign server, testing whatever content it happens to serve.
-if curl -fsS --max-time 5 -o /dev/null "http://localhost:${PORT}/" 2>/dev/null; then
+if curl -fsS --max-time 5 -o /dev/null "http://127.0.0.1:${PORT}/" 2>/dev/null; then
   echo "Port ${PORT} is already in use; set PORT to a free port and retry." >&2
   exit 1
 fi
@@ -95,7 +95,8 @@ fi
 ( cd "$repo_root" && exec "$PYTHON" -m http.server --bind 127.0.0.1 "$PORT" ) >"$work_dir/server.log" 2>&1 &
 server_pid=$!
 
-health_url="http://localhost:${PORT}/tests/browser-smoke.html"
+# Same address as --bind: "localhost" can resolve to ::1 first and reach a different server.
+health_url="http://127.0.0.1:${PORT}/tests/browser-smoke.html"
 tries=0
 until curl -fsS --max-time 5 -o /dev/null "$health_url" 2>/dev/null; do
   if ! kill -0 "$server_pid" 2>/dev/null; then
@@ -115,12 +116,13 @@ done
 dom="$work_dir/dom.html"
 : >"$dom"
 # Chrome cannot start its process sandbox as root (CI containers); nowhere else is dropping it justified.
-browser_flags=()
+# A plain string, not an array: bash before 4.4 treats an empty array as unbound under set -u.
+sandbox_flag=""
 if [ "$(id -u)" = "0" ]; then
-  browser_flags+=(--no-sandbox)
+  sandbox_flag="--no-sandbox"
 fi
 "$browser" \
-  "${browser_flags[@]}" \
+  ${sandbox_flag:+"$sandbox_flag"} \
   --headless=new \
   --disable-gpu \
   --virtual-time-budget=300000 \
